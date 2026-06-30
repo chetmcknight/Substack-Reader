@@ -26,7 +26,7 @@ const LibraryItem = memo(({
   return (
     <GlassCard 
       onClick={() => onSelect(feed.originalUrl)}
-      className="group cursor-pointer hover:bg-[#1A1D24] transition-all duration-300 relative overflow-hidden h-full flex flex-col justify-between border-white/5 hover:border-brand-start/30 hover:shadow-glow-subtle hover:scale-[1.01] origin-center"
+      className="group cursor-pointer hover:bg-[#1A1D24] active:scale-[0.98] transition-all duration-300 relative overflow-hidden h-full flex flex-col justify-between border-white/5 hover:border-brand-start/30 hover:shadow-glow-subtle hover:scale-[1.01] origin-center"
     >
       <div>
         {/* Icon Container */}
@@ -63,7 +63,7 @@ const LibraryItem = memo(({
                 <RotateCw size={14} />
             </button>
          </div>
-         <span className="text-brand-end text-xs font-bold uppercase tracking-wider flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity transform translate-x-2 group-hover:translate-x-0">
+         <span className="text-brand-end text-xs font-bold uppercase tracking-wider flex items-center gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity transform translate-x-0 md:translate-x-2 md:group-hover:translate-x-0">
              Read <ArrowRight size={14} strokeWidth={2.5} />
          </span>
       </div>

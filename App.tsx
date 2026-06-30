@@ -40,6 +40,8 @@ const App: React.FC = () => {
   const addFeedToView = useCallback(async (url: string, forceRefresh = false) => {
     const existing = activeFeeds.find(f => f.originalUrl === url);
     if (existing && !forceRefresh) {
+       // Smooth scroll to top where the active feeds are displayed
+       window.scrollTo({ top: 0, behavior: 'smooth' });
        return;
     }
 
@@ -75,6 +77,11 @@ const App: React.FC = () => {
 
       setLoadingState(LoadingState.SUCCESS);
       setSearchQuery('');
+      
+      // Smooth scroll to top to see the newly loaded feed
+      setTimeout(() => {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }, 100);
     } catch (err) {
       console.error("Feed Load Failed:", err);
       const message = err instanceof Error ? err.message : "An unexpected error occurred.";
