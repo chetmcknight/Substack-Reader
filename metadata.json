@@ -1,0 +1,10 @@
+{
+  "name": "StackReader Pro",
+  "short_name": "StackReader Pro",
+  "description": "Professional-grade Substack RSS reader and AI analyzer. Distraction-free, atmospheric, and lightning fast.",
+  "theme_color": "#050505",
+  "background_color": "#050505",
+  "display": "standalone",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

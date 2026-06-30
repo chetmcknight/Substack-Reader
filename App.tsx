@@ -1,0 +1,227 @@
+
+import React, { useState, useEffect, useCallback, memo } from 'react';
+import { SearchInput } from './components/SearchInput.tsx';
+import { FeedView } from './components/FeedView.tsx';
+import { LibraryList } from './components/LibraryList.tsx';
+import { ArticleModal } from './components/ArticleModal.tsx';
+import { LoadingOverlay } from './components/LoadingOverlay.tsx';
+import { normalizeInputToFeedUrl, fetchAndParseFeed } from './services/rssService.ts';
+import { dbService } from './services/dbService.ts';
+import { FeedData, LoadingState, LibraryFeed, FeedItem } from './types.ts';
+import { AlertCircle, RefreshCcw } from 'lucide-react';
+
+const App: React.FC = () => {
+  const [loadingState, setLoadingState] = useState<LoadingState>(LoadingState.IDLE);
+  const [activeFeeds, setActiveFeeds] = useState<FeedData[]>([]);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [lastAttemptedUrl, setLastAttemptedUrl] = useState<string | null>(null);
+  const [library, setLibrary] = useState<LibraryFeed[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [readingItem, setReadingItem] = useState<FeedItem | null>(null);
+  
+  // Enforce Dark Mode
+  useEffect(() => {
+    document.documentElement.classList.add('dark');
+  }, []);
+
+  // Load library on mount
+  useEffect(() => {
+    const loadLibrary = async () => {
+      try {
+        const localLibrary = await dbService.getLibrary();
+        setLibrary(localLibrary);
+      } catch (e) {
+        console.error("Failed to load library", e);
+      }
+    };
+    loadLibrary();
+  }, []);
+
+  const addFeedToView = useCallback(async (url: string, forceRefresh = false) => {
+    const existing = activeFeeds.find(f => f.originalUrl === url);
+    if (existing && !forceRefresh) {
+       return;
+    }
+
+    setLoadingState(LoadingState.LOADING);
+    setErrorMsg(null);
+    setLastAttemptedUrl(url);
+
+    try {
+      const data = await fetchAndParseFeed(url);
+      
+      setActiveFeeds(prev => {
+        if (prev.some(f => f.originalUrl === data.originalUrl)) {
+             return prev.map(f => f.originalUrl === data.originalUrl ? data : f);
+        }
+        return [data, ...prev]; 
+      });
+      
+      const inLibrary = library.some(l => l.originalUrl === url);
+      if (inLibrary) {
+          const libEntry: LibraryFeed = {
+              title: data.title,
+              originalUrl: data.originalUrl,
+              image: data.image,
+              description: data.description,
+              sourceType: data.sourceType
+          };
+          await dbService.addToLibrary(libEntry);
+          setLibrary(prev => {
+              const filtered = prev.filter(l => l.originalUrl !== url);
+              return [libEntry, ...filtered];
+          });
+      }
+
+      setLoadingState(LoadingState.SUCCESS);
+      setSearchQuery('');
+    } catch (err) {
+      console.error("Feed Load Failed:", err);
+      const message = err instanceof Error ? err.message : "An unexpected error occurred.";
+      setErrorMsg(message);
+      setLoadingState(LoadingState.ERROR);
+    }
+  }, [activeFeeds, library]);
+
+  const handleSearch = useCallback((input: string) => {
+    if (!input.trim()) return;
+    const url = normalizeInputToFeedUrl(input);
+    addFeedToView(url);
+  }, [addFeedToView]);
+
+  const toggleLibrarySave = useCallback(async (feed: FeedData) => {
+    try {
+      const exists = library.some(item => item.originalUrl === feed.originalUrl);
+      
+      if (exists) {
+        setLibrary(prev => prev.filter(item => item.originalUrl !== feed.originalUrl));
+        await dbService.removeFromLibrary(feed.originalUrl);
+      } else {
+        const newFeed: LibraryFeed = {
+          title: feed.title,
+          originalUrl: feed.originalUrl,
+          image: feed.image,
+          description: feed.description,
+          sourceType: feed.sourceType
+        };
+        setLibrary(prev => [newFeed, ...prev]);
+        await dbService.addToLibrary(newFeed);
+      }
+    } catch (e) {
+      console.error("Failed to update library", e);
+    }
+  }, [library]);
+
+  const removeFromLibrary = useCallback(async (e: React.MouseEvent, url: string) => {
+    e.stopPropagation();
+    
+    setLibrary(prev => prev.filter(item => item.originalUrl !== url));
+    await dbService.removeFromLibrary(url);
+  }, []);
+
+  const closeFeed = useCallback((url: string) => {
+    setActiveFeeds(prev => prev.filter(f => f.originalUrl !== url));
+  }, []);
+
+  return (
+    <div className="relative min-h-screen selection:bg-[#ff3152]/30 bg-[#050505] overflow-hidden pb-20 px-4 pt-12 md:pt-24 font-sans text-textPrimary">
+      
+      {/* Immersive Background Effects */}
+      <div className="fixed inset-0 z-0 pointer-events-none">
+        {/* Top Glow */}
+        <div className="absolute top-[-25%] left-[10%] w-[80%] h-[50%] rounded-full bg-[#FF3B5C]/15 blur-[150px] animate-pulse duration-[8000ms]"></div>
+        {/* Accent Blobs */}
+        <div className="absolute top-[15%] right-[-5%] w-[35%] h-[45%] rounded-full bg-[#FF8A3D]/10 blur-[120px]"></div>
+        <div className="absolute bottom-[-15%] left-[-5%] w-[45%] h-[55%] rounded-full bg-indigo-500/10 blur-[130px]"></div>
+        {/* Texture Overlay */}
+        <div className="absolute inset-0 bg-[url('https://tailwindcss.com/_next/static/media/grain.87162d55.svg')] opacity-[0.06] mix-blend-overlay"></div>
+        {/* Radial Dark Mask */}
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,transparent_0%,#050505_95%)]"></div>
+      </div>
+
+      {/* Loading Overlay */}
+      {loadingState === LoadingState.LOADING && <LoadingOverlay />}
+
+      <ArticleModal 
+        item={readingItem}
+        onClose={() => setReadingItem(null)}
+      />
+
+      <div className="relative z-10 max-w-7xl mx-auto flex flex-col items-center">
+        
+        {/* App Title */}
+        <div className="text-center mb-16 space-y-4 relative z-10 max-w-4xl px-2">
+            <h1 className="text-5xl md:text-8xl font-bold text-white font-outfit leading-none tracking-tighter drop-shadow-2xl animate-in fade-in zoom-in-95 duration-700 pr-6 inline-block">
+            StackReader <span className="inline-block text-transparent bg-clip-text bg-gradient-to-r from-brand-start to-brand-end pr-2">Pro</span>
+            </h1>
+            <p className="text-textSecondary text-lg md:text-2xl font-normal leading-relaxed max-w-2xl mx-auto opacity-80">
+            Professional-grade feeds for<br className="hidden md:block" />
+            your favorite Substacks, instantly.
+            </p>
+        </div>
+
+        <SearchInput 
+            onSearch={handleSearch} 
+            isLoading={loadingState === LoadingState.LOADING} 
+            value={searchQuery}
+            onChange={setSearchQuery}
+            showExamples={activeFeeds.length === 0 && loadingState !== LoadingState.LOADING}
+        />
+        
+        {loadingState === LoadingState.ERROR && (
+            <div className="max-w-md w-full mx-auto mb-12 p-8 rounded-[32px] bg-[#050505] border border-red-500/20 shadow-[0_20px_50px_rgba(255,0,0,0.1)] backdrop-blur-xl animate-in fade-in zoom-in-95 duration-300">
+                <div className="flex flex-col items-center text-center gap-6">
+                    <div className="w-16 h-16 rounded-full bg-red-500/10 border border-red-500/20 flex items-center justify-center">
+                        <AlertCircle className="text-red-500" size={32} />
+                    </div>
+                    <div className="space-y-2">
+                        <h4 className="font-bold text-xl text-white font-outfit tracking-tight">Fetch Encountered an Issue</h4>
+                        <p className="text-textSecondary leading-relaxed text-sm max-w-[280px] mx-auto">
+                            {errorMsg}
+                        </p>
+                    </div>
+                    <button 
+                        onClick={() => lastAttemptedUrl && addFeedToView(lastAttemptedUrl, true)}
+                        className="w-full flex items-center justify-center gap-2 px-6 py-3.5 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 rounded-2xl text-white text-sm font-bold transition-all active:scale-95 group"
+                    >
+                        <RefreshCcw size={16} className="group-hover:rotate-180 transition-transform duration-500" />
+                        Attempt Reconnection
+                    </button>
+                </div>
+            </div>
+        )}
+
+        {/* Active Feeds Section */}
+        {activeFeeds.length > 0 && (
+            <div className="mb-20 w-full max-w-4xl mx-auto animate-in slide-in-from-bottom-8 duration-700">
+            {activeFeeds.map(feed => (
+                <FeedView 
+                key={feed.originalUrl}
+                data={feed}
+                isSaved={library.some(lib => lib.originalUrl === feed.originalUrl)}
+                onToggleSave={() => toggleLibrarySave(feed)}
+                onRefresh={() => addFeedToView(feed.originalUrl, true)}
+                onClose={() => closeFeed(feed.originalUrl)}
+                onItemSelect={setReadingItem}
+                />
+            ))}
+            </div>
+        )}
+
+        {/* Library Section */}
+        <LibraryList 
+            feeds={library} 
+            onSelect={(url) => addFeedToView(url)} 
+            onRemove={removeFromLibrary}
+            onRefresh={(url) => addFeedToView(url, true)}
+        />
+      </div>
+
+      <div className="text-center mt-20 text-textMuted text-sm pb-8 font-medium">
+        <p>© 2026 StackReader Pro • Built for Speed</p>
+      </div>
+    </div>
+  );
+};
+
+export default App;
