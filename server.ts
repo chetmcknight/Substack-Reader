@@ -76,6 +76,22 @@ async function startServer() {
         console.warn("Server codetabs fetch failed:", err);
       }
 
+      // Try 4: Fetch via api.allorigins.win
+      try {
+        const alloriginsUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
+        const response = await fetch(alloriginsUrl);
+        if (response.ok) {
+          const json = await response.json();
+          if (json.contents) {
+            return new Response(json.contents, {
+              headers: { 'Content-Type': 'application/xml; charset=utf-8' }
+            });
+          }
+        }
+      } catch (err) {
+        console.warn("Server allorigins fetch failed:", err);
+      }
+
       throw new Error("All proxy attempts failed on server");
     };
 

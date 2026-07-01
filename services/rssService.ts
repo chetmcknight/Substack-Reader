@@ -79,71 +79,103 @@ const parseRSSXML = (xmlString: string, originalUrl: string): FeedData => {
     const parser = new DOMParser();
     const xmlDoc = parser.parseFromString(xmlString, "text/xml");
 
+    // Check for parse error, but do not throw immediately if we can still find channel or entry tags
     const parserError = xmlDoc.querySelector("parsererror");
     if (parserError) {
-        if (xmlString.toLowerCase().includes('404')) throw new Error("Feed not found.");
-        if (xmlString.toLowerCase().includes('403')) throw new Error("Access blocked.");
-        throw new Error("Invalid XML received.");
+        console.warn("DOMParser encountered an XML parsing issue, but we will try our best to parse the tree anyway:", parserError.textContent);
+        if (xmlString.toLowerCase().includes('404')) throw new Error("Feed not found (404).");
+        if (xmlString.toLowerCase().includes('403')) throw new Error("Access blocked (403).");
     }
 
-    const channel = xmlDoc.querySelector("channel");
-    if (!channel) throw new Error("Invalid RSS feed structure.");
+    const channel = xmlDoc.querySelector("channel") || xmlDoc.querySelector("feed") || xmlDoc.documentElement;
+    if (!channel) {
+        throw new Error("Invalid RSS/Atom feed structure: could not identify a root element.");
+    }
 
-    const title = channel.querySelector("title")?.textContent || "Untitled Publication";
-    const description = channel.querySelector("description")?.textContent || "";
-    const link = channel.querySelector("link")?.textContent || originalUrl;
+    const title = channel.querySelector("title")?.textContent?.trim() || "Untitled Publication";
+    const description = (channel.querySelector("description") || channel.querySelector("subtitle") || channel.querySelector("summary"))?.textContent?.trim() || "";
     
-    let image = channel.querySelector("image > url")?.textContent;
+    let link = "";
+    const linkElement = channel.querySelector("link");
+    if (linkElement) {
+        link = linkElement.getAttribute("href") || linkElement.textContent || originalUrl;
+    } else {
+        link = originalUrl;
+    }
+    
+    let image = channel.querySelector("image > url")?.textContent || channel.querySelector("logo")?.textContent || channel.querySelector("icon")?.textContent;
     if (!image) {
        const itunesImage = channel.getElementsByTagNameNS("*", "image")[0];
        if (itunesImage) image = itunesImage.getAttribute("href") || undefined;
     }
     if (!image) {
-        // Try to find image in description
         const imgMatch = description.match(/<img[^>]+src="([^">]+)"/);
         if (imgMatch) image = imgMatch[1];
     }
 
     const items: FeedItem[] = [];
-    const itemElements = xmlDoc.querySelectorAll("item");
+    const itemElements = xmlDoc.querySelectorAll("item, entry");
     
     itemElements.forEach((item) => {
-      const itemTitle = item.querySelector("title")?.textContent || "Untitled Post";
-      const itemLink = item.querySelector("link")?.textContent || "";
-      const pubDate = item.querySelector("pubDate")?.textContent || "";
+      const itemTitle = item.querySelector("title")?.textContent?.trim() || "Untitled Post";
       
-      const descriptionNode = item.querySelector("description");
+      let itemLink = "";
+      const itemLinkElem = item.querySelector("link");
+      if (itemLinkElem) {
+          itemLink = itemLinkElem.getAttribute("href") || itemLinkElem.textContent || "";
+      }
+
+      const pubDate = (item.querySelector("pubDate") || item.querySelector("published") || item.querySelector("updated"))?.textContent || "";
+      
+      const descriptionNode = item.querySelector("description") || item.querySelector("summary") || item.querySelector("content");
       let fullContent = "";
       const encodedContent = item.getElementsByTagName("content:encoded")[0] || 
                              item.getElementsByTagNameNS("*", "encoded")[0];
       
-      if (encodedContent) fullContent = encodedContent.textContent || "";
-      else if (descriptionNode) fullContent = descriptionNode.textContent || "";
+      if (encodedContent) {
+          fullContent = encodedContent.textContent || "";
+      } else if (descriptionNode) {
+          fullContent = descriptionNode.textContent || "";
+      }
 
       let contentSnippet = "";
       if (fullContent) {
-        const tempDiv = document.createElement("div");
-        tempDiv.innerHTML = fullContent;
-        // Clean scripts and styles for safety and cleanliness
-        const scripts = tempDiv.getElementsByTagName('script');
-        while(scripts.length > 0) scripts[0].parentNode?.removeChild(scripts[0]);
-        const styles = tempDiv.getElementsByTagName('style');
-        while(styles.length > 0) styles[0].parentNode?.removeChild(styles[0]);
-        
-        contentSnippet = tempDiv.textContent?.replace(/\s+/g, ' ').trim().substring(0, 240) + "..." || "";
+        try {
+          const tempDiv = document.createElement("div");
+          tempDiv.innerHTML = fullContent;
+          // Clean scripts and styles for safety and cleanliness
+          const scripts = tempDiv.getElementsByTagName('script');
+          while(scripts.length > 0) scripts[0].parentNode?.removeChild(scripts[0]);
+          const styles = tempDiv.getElementsByTagName('style');
+          while(styles.length > 0) styles[0].parentNode?.removeChild(styles[0]);
+          
+          contentSnippet = tempDiv.textContent?.replace(/\s+/g, ' ').trim().substring(0, 240) || "";
+          if (contentSnippet && contentSnippet.length >= 240) {
+              contentSnippet += "...";
+          }
+        } catch (err) {
+          contentSnippet = fullContent.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().substring(0, 240) + "...";
+        }
       }
 
-      const guid = item.querySelector("guid")?.textContent || itemLink;
+      const guid = item.querySelector("guid")?.textContent || item.querySelector("id")?.textContent || itemLink;
 
       items.push({
         title: itemTitle,
         link: itemLink,
         pubDate,
-        contentSnippet,
+        contentSnippet: contentSnippet || "Click to view full post content.",
         content: fullContent,
         guid,
       });
     });
+
+    if (items.length === 0) {
+        if (parserError) {
+            throw new Error(`Failed to parse XML due to errors: ${parserError.textContent?.substring(0, 100)}`);
+        }
+        throw new Error("No feed items could be extracted from this XML.");
+    }
 
     return {
       title,

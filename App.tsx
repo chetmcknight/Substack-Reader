@@ -15,7 +15,14 @@ const App: React.FC = () => {
   const [activeFeeds, setActiveFeeds] = useState<FeedData[]>([]);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [lastAttemptedUrl, setLastAttemptedUrl] = useState<string | null>(null);
-  const [library, setLibrary] = useState<LibraryFeed[]>([]);
+  const [library, setLibrary] = useState<LibraryFeed[]>(() => {
+    try {
+      const stored = localStorage.getItem('stackreader_library');
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  });
   const [searchQuery, setSearchQuery] = useState('');
   const [readingItem, setReadingItem] = useState<FeedItem | null>(null);
   

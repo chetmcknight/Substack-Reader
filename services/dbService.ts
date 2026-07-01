@@ -2,50 +2,129 @@
 import { LibraryFeed } from '../types.ts';
 
 const STORAGE_KEY = 'stackreader_library';
+const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbw0IqNd1yiUAHIn8sX67hgGH3hTmLs-_pzXrPywhorMxMSuA3zBaN6osIX2ooO3iNhL/exec';
+
+const INITIAL_PLACEHOLDERS: LibraryFeed[] = [
+  {
+    title: "The Pragmatic Engineer",
+    originalUrl: "https://blog.pragmaticengineer.com",
+    description: "The #1 substack for software engineers and engineering managers.",
+    sourceType: "SUBSTACK"
+  },
+  {
+    title: "Lenny's Newsletter",
+    originalUrl: "https://www.lennysnewsletter.com",
+    description: "A weekly newsletter on product, growth, and career.",
+    sourceType: "SUBSTACK"
+  },
+  {
+    title: "Astral Codex Ten",
+    originalUrl: "https://www.astralcodexten.com",
+    description: "A blog by Scott Alexander on science, philosophy, and society.",
+    sourceType: "SUBSTACK"
+  }
+];
 
 export const dbService = {
   getLibrary: async (): Promise<LibraryFeed[]> => {
     try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      return stored ? JSON.parse(stored) : [];
+      // Fetch from Google Sheets Apps Script with a timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 4000);
+
+      const response = await fetch(APPS_SCRIPT_URL, {
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+
+      if (response.ok) {
+        const result = await response.json();
+        if (result.status === "success" && Array.isArray(result.data)) {
+          // If the spreadsheet is empty, we return placeholders but don't force write them
+          if (result.data.length === 0) {
+            return INITIAL_PLACEHOLDERS;
+          }
+          // Update local storage cache
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(result.data));
+          return result.data;
+        }
+      }
     } catch (e) {
-      console.error("Error loading library", e);
-      return [];
+      console.warn("Could not fetch library from Google Sheet, falling back to local storage:", e);
     }
+
+    // Fallback to local storage
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
+      }
+    } catch (e) {
+      console.error("Error loading local library", e);
+    }
+
+    return INITIAL_PLACEHOLDERS;
   },
 
   addToLibrary: async (feed: LibraryFeed): Promise<LibraryFeed[]> => {
+    // 1. Update local storage immediately for instant UI responsiveness
+    let library: LibraryFeed[] = [];
     try {
       const stored = localStorage.getItem(STORAGE_KEY);
-      let library: LibraryFeed[] = stored ? JSON.parse(stored) : [];
-      
-      // Remove existing if present to allow update/move to top
+      library = stored ? JSON.parse(stored) : [...INITIAL_PLACEHOLDERS];
       library = library.filter(f => f.originalUrl !== feed.originalUrl);
-      
-      // Add to top
       library.unshift(feed);
-      
       localStorage.setItem(STORAGE_KEY, JSON.stringify(library));
-      return library;
     } catch (e) {
-      console.error("Error adding to library", e);
-      return [];
+      console.error("Error adding to local library", e);
     }
+
+    // 2. Async sync with Google Sheet in the background (no-preflight simple request)
+    fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'text/plain;charset=utf-8'
+      },
+      body: JSON.stringify({
+        action: 'add',
+        feed: feed
+      })
+    }).catch(err => console.error("Error syncing feed addition to Google Sheets:", err));
+
+    return library;
   },
 
   removeFromLibrary: async (url: string): Promise<LibraryFeed[]> => {
+    // 1. Update local storage immediately for instant UI responsiveness
+    let library: LibraryFeed[] = [];
     try {
       const stored = localStorage.getItem(STORAGE_KEY);
-      if (!stored) return [];
-      
-      let library: LibraryFeed[] = JSON.parse(stored);
+      if (stored) {
+        library = JSON.parse(stored);
+      } else {
+        library = [...INITIAL_PLACEHOLDERS];
+      }
       library = library.filter(f => f.originalUrl !== url);
-      
       localStorage.setItem(STORAGE_KEY, JSON.stringify(library));
-      return library;
     } catch (e) {
-      console.error("Error removing from library", e);
-      return [];
+      console.error("Error removing from local library", e);
     }
+
+    // 2. Async sync with Google Sheet in the background (no-preflight simple request)
+    fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'text/plain;charset=utf-8'
+      },
+      body: JSON.stringify({
+        action: 'remove',
+        originalUrl: url
+      })
+    }).catch(err => console.error("Error syncing feed removal from Google Sheets:", err));
+
+    return library;
   }
 };
