@@ -38,7 +38,7 @@ export const dbService = {
       }).catch(err => console.error(`Error sending setup action '${action}':`, err));
     }
 
-    // Also send a fallback header insert to ensure 'title', 'originalUrl', 'description', 'sourceType' is written 
+    // Also send a fallback header insert to ensure 'title', 'originalUrl', 'description' is written 
     // in case the Apps Script only supports standard appends and starts with an empty sheet.
     fetch(APPS_SCRIPT_URL, {
       method: 'POST',
@@ -50,8 +50,7 @@ export const dbService = {
         feed: {
           title: 'title',
           originalUrl: 'originalUrl',
-          description: 'description',
-          sourceType: 'sourceType'
+          description: 'description'
         }
       })
     }).catch(err => console.error("Error sending fallback headers:", err));

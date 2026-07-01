@@ -49,7 +49,7 @@ function doPost(e) {
   if (action === "add" && payload.feed) {
     var feed = payload.feed;
     removeFeedByUrl(sheet, feed.originalUrl);
-    sheet.appendRow([feed.title, feed.originalUrl, feed.description, feed.sourceType]);
+    sheet.appendRow([feed.title, feed.originalUrl, feed.description]);
     deduplicateSheet(sheet);
     return ContentService.createTextOutput(JSON.stringify({ status: "success", message: "Added & Cleaned" }))
       .setMimeType(ContentService.MimeType.JSON);
@@ -80,12 +80,12 @@ function doPost(e) {
 
 function ensureHeaders(sheet) {
   if (sheet.getLastRow() === 0) {
-    sheet.appendRow(["title", "originalUrl", "description", "sourceType"]);
+    sheet.appendRow(["title", "originalUrl", "description"]);
   } else {
-    var firstRow = sheet.getRange(1, 1, 1, 4).getValues()[0];
+    var firstRow = sheet.getRange(1, 1, 1, 3).getValues()[0];
     if (firstRow[0] !== "title" || firstRow[1] !== "originalUrl") {
       sheet.insertRowBefore(1);
-      sheet.getRange(1, 1, 1, 4).setValues([["title", "originalUrl", "description", "sourceType"]]);
+      sheet.getRange(1, 1, 1, 3).setValues([["title", "originalUrl", "description"]]);
     }
   }
 }
