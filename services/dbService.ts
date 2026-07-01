@@ -76,16 +76,72 @@ export const dbService = {
             const seen = new Set<string>();
             const uniqueData: LibraryFeed[] = [];
             for (const item of result.data) {
-              if (item && item.originalUrl) {
-                const urlKey = item.originalUrl.trim().toLowerCase();
-                const titleKey = (item.title || "").trim().toLowerCase();
-                // Skip header row indicators if they are read back as a data item
-                if (urlKey === "originalurl" || urlKey === "url" || titleKey === "title") {
-                  continue;
+              if (item) {
+                let title = "";
+                let originalUrl = "";
+                let image = "";
+                let description = "";
+
+                if (Array.isArray(item)) {
+                  // Raw row format: [Title, Description, FeedUrl, OriginalUrl, LogoUrl, LastUpdated]
+                  title = String(item[0] || "").trim();
+                  description = String(item[1] || "").trim();
+                  originalUrl = String(item[3] || item[2] || item[0] || "").trim();
+                  image = String(item[4] || "").trim();
+                } else if (typeof item === 'object') {
+                  // Flexible object key mapping supporting camelCase, lowercase, TitleCase, etc.
+                  title = String(item.title || item.Title || item.name || item.Name || "").trim();
+                  description = String(item.description || item.Description || "").trim();
+                  originalUrl = String(
+                    item.originalUrl || 
+                    item.originalurl || 
+                    item.url || 
+                    item.Url || 
+                    item.URL ||
+                    item.feedUrl || 
+                    item.feedurl || 
+                    item.FeedUrl || 
+                    item.OriginalUrl || 
+                    ""
+                  ).trim();
+                  image = String(
+                    item.image || 
+                    item.logoUrl || 
+                    item.logourl || 
+                    item.logo || 
+                    item.LogoUrl || 
+                    item.Logo || 
+                    ""
+                  ).trim();
                 }
-                if (!seen.has(urlKey)) {
-                  seen.add(urlKey);
-                  uniqueData.push(item);
+
+                if (originalUrl) {
+                  const urlKey = originalUrl.toLowerCase();
+                  const titleKey = title.toLowerCase();
+
+                  // Filter out headers/placeholders
+                  if (
+                    urlKey === "originalurl" || 
+                    urlKey === "url" || 
+                    urlKey === "feedurl" || 
+                    titleKey === "title" || 
+                    titleKey === "title name" ||
+                    urlKey.startsWith("http://originalurl") ||
+                    urlKey.startsWith("https://originalurl")
+                  ) {
+                    continue;
+                  }
+
+                  if (!seen.has(urlKey)) {
+                    seen.add(urlKey);
+                    uniqueData.push({
+                      title: title || "Untitled Publication",
+                      originalUrl: originalUrl,
+                      image: image || "",
+                      description: description || "Substack publication feed.",
+                      sourceType: 'SUBSTACK'
+                    });
+                  }
                 }
               }
             }
