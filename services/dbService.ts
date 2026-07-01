@@ -25,49 +25,26 @@ const INITIAL_PLACEHOLDERS: LibraryFeed[] = [
 ];
 
 export const dbService = {
-  // Triggers remote initialization actions in the background to set up column headers
+  // Triggers remote initialization action in the background to set up column headers
   initializeSheet: async (): Promise<void> => {
-    const actions = ['setup', 'initialize', 'init', 'create_headers'];
-    for (const action of actions) {
-      fetch(APPS_SCRIPT_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'text/plain;charset=utf-8'
-        },
-        body: JSON.stringify({ action })
-      }).catch(err => console.error(`Error sending setup action '${action}':`, err));
-    }
-
-    // Also send a fallback header insert to ensure 'title', 'originalUrl', 'description' is written 
-    // in case the Apps Script only supports standard appends and starts with an empty sheet.
     fetch(APPS_SCRIPT_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'text/plain;charset=utf-8'
       },
-      body: JSON.stringify({
-        action: 'add',
-        feed: {
-          title: 'title',
-          originalUrl: 'originalUrl',
-          description: 'description'
-        }
-      })
-    }).catch(err => console.error("Error sending fallback headers:", err));
+      body: JSON.stringify({ action: 'setup' })
+    }).catch(err => console.error("Error sending setup action:", err));
   },
 
-  // Triggers remote deduplication actions in the background
+  // Triggers remote deduplication action in the background
   deduplicateSheet: async (): Promise<void> => {
-    const actions = ['deduplicate', 'dedup', 'removeDuplicates', 'remove_duplicates', 'cleanDuplicates', 'delete_duplicates'];
-    for (const action of actions) {
-      fetch(APPS_SCRIPT_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'text/plain;charset=utf-8'
-        },
-        body: JSON.stringify({ action })
-      }).catch(err => console.error(`Error sending background action '${action}':`, err));
-    }
+    fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'text/plain;charset=utf-8'
+      },
+      body: JSON.stringify({ action: 'deduplicate' })
+    }).catch(err => console.error("Error sending background deduplicate action:", err));
   },
 
   getLibrary: async (): Promise<LibraryFeed[]> => {
@@ -236,21 +213,7 @@ export const dbService = {
     }
 
     // 2. Async sync with Google Sheet in the background (no-preflight simple request)
-    // We send a highly robust payload with multiple common properties (url, originalUrl, feedUrl, etc.)
-    // and fire fallbacks for multiple possible action names ('remove', 'delete', 'unsave', 'unsafe')
-    // to guarantee it matches whatever structure the Apps Script is expecting.
-    const payload = {
-      url: url,
-      originalUrl: url,
-      feedUrl: url,
-      feed: {
-        url: url,
-        originalUrl: url,
-        feedUrl: url
-      }
-    };
-
-    // Send action: 'remove'
+    // Send a single highly robust payload with all common URL parameter formats
     fetch(APPS_SCRIPT_URL, {
       method: 'POST',
       headers: {
@@ -258,45 +221,16 @@ export const dbService = {
       },
       body: JSON.stringify({
         action: 'remove',
-        ...payload
+        url: url,
+        originalUrl: url,
+        feedUrl: url,
+        feed: {
+          url: url,
+          originalUrl: url,
+          feedUrl: url
+        }
       })
-    }).catch(err => console.error("Error syncing feed removal (action: remove):", err));
-
-    // Send action: 'delete'
-    fetch(APPS_SCRIPT_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'text/plain;charset=utf-8'
-      },
-      body: JSON.stringify({
-        action: 'delete',
-        ...payload
-      })
-    }).catch(err => console.error("Error syncing feed removal (action: delete):", err));
-
-    // Send action: 'unsave'
-    fetch(APPS_SCRIPT_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'text/plain;charset=utf-8'
-      },
-      body: JSON.stringify({
-        action: 'unsave',
-        ...payload
-      })
-    }).catch(err => console.error("Error syncing feed removal (action: unsave):", err));
-
-    // Send action: 'unsafe'
-    fetch(APPS_SCRIPT_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'text/plain;charset=utf-8'
-      },
-      body: JSON.stringify({
-        action: 'unsafe',
-        ...payload
-      })
-    }).catch(err => console.error("Error syncing feed removal (action: unsafe):", err));
+    }).catch(err => console.error("Error syncing feed removal:", err));
 
     // Trigger remote deduplication and auto-setup in the background
     dbService.deduplicateSheet().catch(() => {});

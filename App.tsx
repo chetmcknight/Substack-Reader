@@ -43,13 +43,13 @@ const App: React.FC = () => {
     const autoSyncAndClean = async () => {
       try {
         setIsSyncingSheet(true);
-        // 1. Initialize sheet headers if they are missing or corrupt
-        await dbService.initializeSheet();
-        // 2. Clear any pre-existing duplicate rows in the sheet
-        await dbService.deduplicateSheet();
-        // 3. Fetch latest fully synchronized and deduplicated library
+        // 1. Fetch latest fully synchronized and deduplicated library FIRST to render UI instantly
         const freshLibrary = await dbService.getLibrary();
         setLibrary(freshLibrary);
+
+        // 2. Run initialization and deduplication in the background without blocking the mount
+        dbService.initializeSheet().catch(e => console.error("Background init failed:", e));
+        dbService.deduplicateSheet().catch(e => console.error("Background dedup failed:", e));
       } catch (e) {
         console.error("Auto Sync & Clean-up failed on mount:", e);
       } finally {
