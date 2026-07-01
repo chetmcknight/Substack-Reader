@@ -108,6 +108,53 @@ async function startServer() {
     }
   });
 
+  // --- GOOGLE SHEETS PROXY ---
+  // Proxies requests to Google Apps Script to bypass strict browser/mobile CORS and ITP restrictions.
+  app.all('/api/sheet', async (req, res) => {
+    const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwF4gAkG3fpyIh3qvUttjeJcnZvmhOOXI_yTzx-IbqkRRDqkFafVuyU2g5FY2yjsSDu/exec';
+    
+    try {
+      if (req.method === 'GET') {
+        const response = await fetch(APPS_SCRIPT_URL);
+        if (!response.ok) {
+          throw new Error(`Google Sheets fetch failed with status ${response.status}`);
+        }
+        const text = await response.text();
+        try {
+          const json = JSON.parse(text);
+          return res.json(json);
+        } catch {
+          res.setHeader('Content-Type', 'text/plain');
+          return res.send(text);
+        }
+      } else if (req.method === 'POST') {
+        const response = await fetch(APPS_SCRIPT_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'text/plain;charset=utf-8'
+          },
+          body: JSON.stringify(req.body)
+        });
+        if (!response.ok) {
+          throw new Error(`Google Sheets post failed with status ${response.status}`);
+        }
+        const text = await response.text();
+        try {
+          const json = JSON.parse(text);
+          return res.json(json);
+        } catch {
+          res.setHeader('Content-Type', 'text/plain');
+          return res.send(text);
+        }
+      } else {
+        return res.status(405).send('Method Not Allowed');
+      }
+    } catch (error: any) {
+      console.error('Google Sheets Proxy Error:', error);
+      res.status(500).json({ error: error.message || 'Internal proxy error' });
+    }
+  });
+
   // --- GEMINI ANALYSIS ROUTE ---
   app.post('/api/analyze', async (req, res) => {
     try {

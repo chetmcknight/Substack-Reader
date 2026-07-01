@@ -1,50 +1,45 @@
 import { LibraryFeed } from '../types.ts';
 
 const STORAGE_KEY = 'stackreader_library';
-const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwF4gAkG3fpyIh3qvUttjeJcnZvmhOOXI_yTzx-IbqkRRDqkFafVuyU2g5FY2yjsSDu/exec';
+const APPS_SCRIPT_URL = '/api/sheet';
 
-const INITIAL_PLACEHOLDERS: LibraryFeed[] = [
-  {
-    title: "The Pragmatic Engineer",
-    originalUrl: "https://blog.pragmaticengineer.com",
-    description: "The #1 substack for software engineers and engineering managers.",
-    sourceType: "SUBSTACK"
-  },
-  {
-    title: "Lenny's Newsletter",
-    originalUrl: "https://www.lennysnewsletter.com",
-    description: "A weekly newsletter on product, growth, and career.",
-    sourceType: "SUBSTACK"
-  },
-  {
-    title: "Astral Codex Ten",
-    originalUrl: "https://www.astralcodexten.com",
-    description: "A blog by Scott Alexander on science, philosophy, and society.",
-    sourceType: "SUBSTACK"
-  }
-];
+const INITIAL_PLACEHOLDERS: LibraryFeed[] = [];
 
 export const dbService = {
   // Triggers remote initialization action in the background to set up column headers
   initializeSheet: async (): Promise<void> => {
-    fetch(APPS_SCRIPT_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'text/plain;charset=utf-8'
-      },
-      body: JSON.stringify({ action: 'setup' })
-    }).catch(err => console.error("Error sending setup action:", err));
+    try {
+      const response = await fetch(APPS_SCRIPT_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ action: 'setup' })
+      });
+      if (!response.ok) {
+        console.error("Failed to initialize sheet headers:", response.statusText);
+      }
+    } catch (err) {
+      console.error("Error sending setup action:", err);
+    }
   },
 
   // Triggers remote deduplication action in the background
   deduplicateSheet: async (): Promise<void> => {
-    fetch(APPS_SCRIPT_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'text/plain;charset=utf-8'
-      },
-      body: JSON.stringify({ action: 'deduplicate' })
-    }).catch(err => console.error("Error sending background deduplicate action:", err));
+    try {
+      const response = await fetch(APPS_SCRIPT_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ action: 'deduplicate' })
+      });
+      if (!response.ok) {
+        console.error("Failed to deduplicate sheet:", response.statusText);
+      }
+    } catch (err) {
+      console.error("Error sending background deduplicate action:", err);
+    }
   },
 
   getLibrary: async (): Promise<LibraryFeed[]> => {
@@ -59,36 +54,51 @@ export const dbService = {
       clearTimeout(timeoutId);
 
       if (response.ok) {
-        const result = await response.json();
-        if (result.status === "success" && Array.isArray(result.data)) {
-          // If the spreadsheet is empty, we return placeholders but don't force write them
-          if (result.data.length === 0) {
-            return INITIAL_PLACEHOLDERS;
-          }
+        const text = await response.text();
 
-          // Deduplicate and filter out any header row values that might be treated as a data record
-          const seen = new Set<string>();
-          const uniqueData: LibraryFeed[] = [];
-          for (const item of result.data) {
-            if (item && item.originalUrl) {
-              const urlKey = item.originalUrl.trim().toLowerCase();
-              // Skip header row indicators if they are read back as a data item
-              if (urlKey === "originalurl" || urlKey === "url") {
-                continue;
-              }
-              if (!seen.has(urlKey)) {
-                seen.add(urlKey);
-                uniqueData.push(item);
+        // Diagnostic check for Google Apps Script TypeError
+        if (text.includes("TypeError") || text.includes("setHeaders") || text.includes("is not a function")) {
+          console.error("Detected Google Apps Script Type Error in response:", text);
+          localStorage.setItem("sheet_error_diagnostic", "true");
+        } else {
+          localStorage.removeItem("sheet_error_diagnostic");
+        }
+
+        try {
+          const result = JSON.parse(text);
+          if (result.status === "success" && Array.isArray(result.data)) {
+            // If the spreadsheet is empty, we return placeholders but don't force write them
+            if (result.data.length === 0) {
+              return INITIAL_PLACEHOLDERS;
+            }
+
+            // Deduplicate and filter out any header row values that might be treated as a data record
+            const seen = new Set<string>();
+            const uniqueData: LibraryFeed[] = [];
+            for (const item of result.data) {
+              if (item && item.originalUrl) {
+                const urlKey = item.originalUrl.trim().toLowerCase();
+                const titleKey = (item.title || "").trim().toLowerCase();
+                // Skip header row indicators if they are read back as a data item
+                if (urlKey === "originalurl" || urlKey === "url" || titleKey === "title") {
+                  continue;
+                }
+                if (!seen.has(urlKey)) {
+                  seen.add(urlKey);
+                  uniqueData.push(item);
+                }
               }
             }
+
+            // Trigger remote deduplication in the background
+            dbService.deduplicateSheet().catch(() => {});
+
+            // Update local storage cache
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(uniqueData));
+            return uniqueData;
           }
-
-          // Trigger remote deduplication and auto setup in the background
-          dbService.deduplicateSheet().catch(() => {});
-
-          // Update local storage cache
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(uniqueData));
-          return uniqueData;
+        } catch (parseError) {
+          console.warn("Could not parse Apps Script response as JSON:", text);
         }
       }
     } catch (e) {
@@ -163,7 +173,7 @@ export const dbService = {
     fetch(APPS_SCRIPT_URL, {
       method: 'POST',
       headers: {
-        'Content-Type': 'text/plain;charset=utf-8'
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify({
         action: 'add',
@@ -217,7 +227,7 @@ export const dbService = {
     fetch(APPS_SCRIPT_URL, {
       method: 'POST',
       headers: {
-        'Content-Type': 'text/plain;charset=utf-8'
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify({
         action: 'remove',

@@ -47,9 +47,16 @@ const App: React.FC = () => {
         const freshLibrary = await dbService.getLibrary();
         setLibrary(freshLibrary);
 
-        // 2. Run initialization and deduplication in the background without blocking the mount
-        dbService.initializeSheet().catch(e => console.error("Background init failed:", e));
-        dbService.deduplicateSheet().catch(e => console.error("Background dedup failed:", e));
+        // 2. Run initialization and deduplication sequentially in the background without blocking the mount
+        const runBackgroundSetup = async () => {
+          try {
+            await dbService.initializeSheet();
+            await dbService.deduplicateSheet();
+          } catch (e) {
+            console.error("Background sheet initialization/deduplication failed:", e);
+          }
+        };
+        runBackgroundSetup();
       } catch (e) {
         console.error("Auto Sync & Clean-up failed on mount:", e);
       } finally {
