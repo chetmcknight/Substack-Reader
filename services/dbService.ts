@@ -17,9 +17,15 @@ const getHeaders = (contentType?: string): Record<string, string> => {
   return headers;
 };
 
+const isSyncEnabled = (): boolean => {
+  const customUrl = localStorage.getItem('stackreader_apps_script_url');
+  return typeof customUrl === 'string' && customUrl.trim().startsWith('https://');
+};
+
 export const dbService = {
   // Triggers remote initialization action in the background to set up column headers
   initializeSheet: async (): Promise<void> => {
+    if (!isSyncEnabled()) return;
     try {
       const response = await fetch(APPS_SCRIPT_URL, {
         method: 'POST',
@@ -36,6 +42,7 @@ export const dbService = {
 
   // Triggers remote deduplication action in the background
   deduplicateSheet: async (): Promise<void> => {
+    if (!isSyncEnabled()) return;
     try {
       const response = await fetch(APPS_SCRIPT_URL, {
         method: 'POST',
@@ -51,6 +58,37 @@ export const dbService = {
   },
 
   getLibrary: async (): Promise<LibraryFeed[]> => {
+    if (!isSyncEnabled()) {
+      localStorage.removeItem("sheet_error_diagnostic");
+      // Fallback to local storage
+      try {
+        const stored = localStorage.getItem(STORAGE_KEY);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            const seen = new Set<string>();
+            const uniqueData: LibraryFeed[] = [];
+            for (const item of parsed) {
+              if (item && item.originalUrl) {
+                const urlKey = item.originalUrl.trim().toLowerCase();
+                if (urlKey === "originalurl" || urlKey === "url") {
+                  continue;
+                }
+                if (!seen.has(urlKey)) {
+                  seen.add(urlKey);
+                  uniqueData.push(item);
+                }
+              }
+            }
+            return uniqueData;
+          }
+        }
+      } catch (e) {
+        console.error("Error loading local library", e);
+      }
+      return INITIAL_PLACEHOLDERS;
+    }
+
     try {
       // Fetch from Google Sheets Apps Script with a timeout
       const controller = new AbortController();
@@ -281,17 +319,19 @@ export const dbService = {
     }
 
     // 2. Async sync with Google Sheet in the background (no-preflight simple request)
-    fetch(APPS_SCRIPT_URL, {
-      method: 'POST',
-      headers: getHeaders('application/json'),
-      body: JSON.stringify({
-        action: 'add',
-        feed: feed
-      })
-    }).catch(err => console.error("Error syncing feed addition to Google Sheets:", err));
+    if (isSyncEnabled()) {
+      fetch(APPS_SCRIPT_URL, {
+        method: 'POST',
+        headers: getHeaders('application/json'),
+        body: JSON.stringify({
+          action: 'add',
+          feed: feed
+        })
+      }).catch(err => console.error("Error syncing feed addition to Google Sheets:", err));
 
-    // Trigger remote deduplication and auto-setup in the background
-    dbService.deduplicateSheet().catch(() => {});
+      // Trigger remote deduplication and auto-setup in the background
+      dbService.deduplicateSheet().catch(() => {});
+    }
 
     return library;
   },
@@ -333,24 +373,26 @@ export const dbService = {
 
     // 2. Async sync with Google Sheet in the background (no-preflight simple request)
     // Send a single highly robust payload with all common URL parameter formats
-    fetch(APPS_SCRIPT_URL, {
-      method: 'POST',
-      headers: getHeaders('application/json'),
-      body: JSON.stringify({
-        action: 'remove',
-        url: url,
-        originalUrl: url,
-        feedUrl: url,
-        feed: {
+    if (isSyncEnabled()) {
+      fetch(APPS_SCRIPT_URL, {
+        method: 'POST',
+        headers: getHeaders('application/json'),
+        body: JSON.stringify({
+          action: 'remove',
           url: url,
           originalUrl: url,
-          feedUrl: url
-        }
-      })
-    }).catch(err => console.error("Error syncing feed removal:", err));
+          feedUrl: url,
+          feed: {
+            url: url,
+            originalUrl: url,
+            feedUrl: url
+          }
+        })
+      }).catch(err => console.error("Error syncing feed removal:", err));
 
-    // Trigger remote deduplication and auto-setup in the background
-    dbService.deduplicateSheet().catch(() => {});
+      // Trigger remote deduplication and auto-setup in the background
+      dbService.deduplicateSheet().catch(() => {});
+    }
 
     return library;
   }

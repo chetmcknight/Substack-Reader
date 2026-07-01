@@ -108,6 +108,43 @@ async function startServer() {
     }
   });
 
+  // --- REDIRECT PRESERVING FETCH FOR GOOGLE APPS SCRIPT ---
+  // Node's native fetch changes POST to GET on a 302 Found response, which strips the POST payload.
+  // This helper manually follows redirects while preserving the original method and body.
+  const fetchWithRedirects = async (url: string, options: any = {}, maxRedirects = 5): Promise<Response> => {
+    let currentUrl = url;
+    const currentOptions = { ...options };
+
+    for (let i = 0; i < maxRedirects; i++) {
+      const response = await fetch(currentUrl, {
+        ...currentOptions,
+        redirect: 'manual'
+      });
+
+      const isRedirect = [301, 302, 303, 307, 308].includes(response.status);
+      if (isRedirect) {
+        const location = response.headers.get('location');
+        if (!location) {
+          return response;
+        }
+        currentUrl = new URL(location, currentUrl).toString();
+
+        if (response.status === 303) {
+          currentOptions.method = 'GET';
+          delete currentOptions.body;
+          if (currentOptions.headers) {
+            delete currentOptions.headers['Content-Type'];
+            delete currentOptions.headers['content-type'];
+          }
+        }
+      } else {
+        return response;
+      }
+    }
+
+    throw new Error(`Too many redirects (max: ${maxRedirects})`);
+  };
+
   // --- GOOGLE SHEETS PROXY ---
   // Proxies requests to Google Apps Script to bypass strict browser/mobile CORS and ITP restrictions.
   app.all('/api/sheet', async (req, res) => {
@@ -118,7 +155,9 @@ async function startServer() {
     
     try {
       if (req.method === 'GET') {
-        const response = await fetch(APPS_SCRIPT_URL);
+        const response = await fetchWithRedirects(APPS_SCRIPT_URL, {
+          method: 'GET'
+        });
         if (!response.ok) {
           throw new Error(`Google Sheets fetch failed with status ${response.status}`);
         }
@@ -131,7 +170,7 @@ async function startServer() {
           return res.send(text);
         }
       } else if (req.method === 'POST') {
-        const response = await fetch(APPS_SCRIPT_URL, {
+        const response = await fetchWithRedirects(APPS_SCRIPT_URL, {
           method: 'POST',
           headers: {
             'Content-Type': 'text/plain;charset=utf-8'
