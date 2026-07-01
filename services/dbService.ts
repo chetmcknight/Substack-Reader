@@ -19,6 +19,8 @@ const getHeaders = (contentType?: string): Record<string, string> => {
 
 const isSyncEnabled = (): boolean => {
   const customUrl = localStorage.getItem('stackreader_apps_script_url');
+  if (customUrl === 'disabled') return false;
+  if (!customUrl) return true; // Default to true to use the built-in server default
   return typeof customUrl === 'string' && customUrl.trim().startsWith('https://');
 };
 
@@ -92,7 +94,7 @@ export const dbService = {
     try {
       // Fetch from Google Sheets Apps Script with a timeout
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 4000);
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
 
       const response = await fetch(APPS_SCRIPT_URL, {
         signal: controller.signal,

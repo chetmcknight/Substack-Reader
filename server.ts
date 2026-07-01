@@ -45,6 +45,7 @@ async function startServer() {
       // Try 1: Direct fetch with browser headers
       try {
         const response = await fetch(url, {
+          signal: AbortSignal.timeout(6000),
           headers: {
             'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
@@ -61,6 +62,7 @@ async function startServer() {
       try {
         const corsProxyUrl = `https://corsproxy.io/?url=${encodeURIComponent(url)}`;
         const response = await fetch(corsProxyUrl, {
+          signal: AbortSignal.timeout(6000),
           headers: {
             'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
           }
@@ -73,7 +75,7 @@ async function startServer() {
       // Try 3: Fetch via api.codetabs.com
       try {
         const codetabsUrl = `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`;
-        const response = await fetch(codetabsUrl);
+        const response = await fetch(codetabsUrl, { signal: AbortSignal.timeout(5000) });
         if (response.ok) return response;
       } catch (err) {
         console.warn("Server codetabs fetch failed:", err);
@@ -82,7 +84,7 @@ async function startServer() {
       // Try 4: Fetch via api.allorigins.win
       try {
         const alloriginsUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
-        const response = await fetch(alloriginsUrl);
+        const response = await fetch(alloriginsUrl, { signal: AbortSignal.timeout(5000) });
         if (response.ok) {
           const json = await response.json();
           if (json.contents) {
@@ -121,6 +123,7 @@ async function startServer() {
     for (let i = 0; i < maxRedirects; i++) {
       const response = await fetch(currentUrl, {
         ...currentOptions,
+        signal: AbortSignal.timeout(10000), // Prevent hanging
         redirect: 'manual'
       });
 
