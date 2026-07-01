@@ -88,17 +88,7 @@ export const LibraryList: React.FC<LibraryListProps> = ({
       <div className="mb-10 text-center relative flex flex-col items-center">
          <h2 className="text-2xl font-bold text-white mb-2">Your Library</h2>
          <p className="text-textSecondary mb-4">Access your saved Substack feeds instantly.</p>
-         {onSyncSheet && (
-           <button
-             onClick={onSyncSheet}
-             disabled={isSyncingSheet}
-             className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-brand-end hover:text-white bg-brand-end/10 hover:bg-brand-end/25 border border-brand-end/20 rounded-full transition-all duration-300 active:scale-95 disabled:opacity-50 cursor-pointer"
-             id="sync-sheet-btn"
-           >
-             <RefreshCw size={12} className={`${isSyncingSheet ? 'animate-spin' : ''}`} />
-             {isSyncingSheet ? 'Syncing & Clean-up Active...' : 'Sync & Clean Google Sheet'}
-           </button>
-         )}
+         {/* Sync and clean are automated in the background */}
       </div>
       
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">

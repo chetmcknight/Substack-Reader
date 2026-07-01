@@ -8,119 +8,7 @@ import { LoadingOverlay } from './components/LoadingOverlay.tsx';
 import { normalizeInputToFeedUrl, fetchAndParseFeed } from './services/rssService.ts';
 import { dbService } from './services/dbService.ts';
 import { FeedData, LoadingState, LibraryFeed, FeedItem } from './types.ts';
-import { AlertCircle, RefreshCcw, Check, Copy, ChevronDown, ChevronUp, FileSpreadsheet, Terminal, Database } from 'lucide-react';
-
-const APPS_SCRIPT_CODE = `function doGet(e) {
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-  var data = [];
-  if (sheet.getLastRow() > 0) {
-    var rows = sheet.getDataRange().getValues();
-    var headers = rows[0];
-    for (var i = 1; i < rows.length; i++) {
-      var row = rows[i];
-      var record = {};
-      for (var j = 0; j < headers.length; j++) {
-        var key = headers[j] ? headers[j].toString().trim() : "col_" + j;
-        record[key] = row[j];
-      }
-      data.push(record);
-    }
-  }
-  return ContentService.createTextOutput(JSON.stringify({ status: "success", data: data }))
-    .setMimeType(ContentService.MimeType.JSON)
-    .setHeaders({
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "GET, POST, OPTIONS"
-    });
-}
-
-function doPost(e) {
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-  ensureHeaders(sheet);
-  var payload;
-  try {
-    payload = JSON.parse(e.postData.contents);
-  } catch(err) {
-    return ContentService.createTextOutput(JSON.stringify({ status: "error", message: "Invalid JSON" }))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-  var action = payload.action;
-  
-  if (action === "add" && payload.feed) {
-    var feed = payload.feed;
-    removeFeedByUrl(sheet, feed.originalUrl);
-    sheet.appendRow([feed.title, feed.originalUrl, feed.description]);
-    deduplicateSheet(sheet);
-    return ContentService.createTextOutput(JSON.stringify({ status: "success", message: "Added & Cleaned" }))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-  
-  if (action === "remove" || action === "delete" || action === "unsave" || action === "unsafe") {
-    var url = payload.originalUrl || payload.url || payload.feedUrl;
-    if (url) removeFeedByUrl(sheet, url);
-    return ContentService.createTextOutput(JSON.stringify({ status: "success", message: "Removed" }))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-  
-  if (action === "deduplicate" || action === "dedup" || action === "remove_duplicates") {
-    deduplicateSheet(sheet);
-    return ContentService.createTextOutput(JSON.stringify({ status: "success", message: "Deduplicated" }))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-  
-  if (action === "initialize" || action === "init" || action === "setup") {
-    ensureHeaders(sheet);
-    return ContentService.createTextOutput(JSON.stringify({ status: "success", message: "Headers Initialized" }))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-  
-  return ContentService.createTextOutput(JSON.stringify({ status: "error", message: "Unsupported Action" }))
-    .setMimeType(ContentService.MimeType.JSON);
-}
-
-function ensureHeaders(sheet) {
-  if (sheet.getLastRow() === 0) {
-    sheet.appendRow(["title", "originalUrl", "description"]);
-  } else {
-    var firstRow = sheet.getRange(1, 1, 1, 3).getValues()[0];
-    if (firstRow[0] !== "title" || firstRow[1] !== "originalUrl") {
-      sheet.insertRowBefore(1);
-      sheet.getRange(1, 1, 1, 3).setValues([["title", "originalUrl", "description"]]);
-    }
-  }
-}
-
-function removeFeedByUrl(sheet, url) {
-  if (!url) return;
-  url = url.toString().trim().toLowerCase();
-  var rows = sheet.getDataRange().getValues();
-  for (var i = rows.length - 1; i >= 1; i--) {
-    var rowUrl = rows[i][1] ? rows[i][1].toString().trim().toLowerCase() : "";
-    if (rowUrl === url) {
-      sheet.deleteRow(i + 1);
-    }
-  }
-}
-
-function deduplicateSheet(sheet) {
-  var rows = sheet.getDataRange().getValues();
-  if (rows.length <= 2) return;
-  var seen = {};
-  var rowsToDelete = [];
-  for (var i = 1; i < rows.length; i++) {
-    var url = rows[i][1] ? rows[i][1].toString().trim().toLowerCase() : "";
-    if (url) {
-      if (seen[url]) {
-        rowsToDelete.push(i + 1);
-      } else {
-        seen[url] = true;
-      }
-    }
-  }
-  for (var j = rowsToDelete.length - 1; j >= 0; j--) {
-    sheet.deleteRow(rowsToDelete[j]);
-  }
-}`;
+import { AlertCircle, RefreshCcw } from 'lucide-react';
 
 const App: React.FC = () => {
   const [loadingState, setLoadingState] = useState<LoadingState>(LoadingState.IDLE);
@@ -144,8 +32,6 @@ const App: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [readingItem, setReadingItem] = useState<FeedItem | null>(null);
   const [isSyncingSheet, setIsSyncingSheet] = useState(false);
-  const [showSetup, setShowSetup] = useState(false);
-  const [copied, setCopied] = useState(false);
   
   // Enforce Dark Mode
   useEffect(() => {
@@ -187,12 +73,6 @@ const App: React.FC = () => {
 
     return () => clearInterval(intervalId);
   }, []);
-
-  const copyScriptToClipboard = () => {
-    navigator.clipboard.writeText(APPS_SCRIPT_CODE);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
 
   const addFeedToView = useCallback(async (url: string, forceRefresh = false) => {
     const existing = activeFeeds.find(f => f.originalUrl === url);
@@ -395,90 +275,6 @@ const App: React.FC = () => {
             onSyncSheet={handleSyncSheet}
             isSyncingSheet={isSyncingSheet}
         />
-
-        {/* Google Sheet Integration Status & Setup Guide */}
-        <div className="w-full max-w-4xl mx-auto mt-12 bg-[#0a0a0a]/60 backdrop-blur-xl border border-white/5 rounded-[32px] p-6 md:p-8 shadow-[0_20px_50px_rgba(0,0,0,0.4)] relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-32 h-32 bg-brand-end/10 rounded-full blur-3xl pointer-events-none"></div>
-          
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-white/5 pb-6 mb-6">
-            <div className="flex items-start gap-4">
-              <div className="w-12 h-12 rounded-2xl bg-brand-end/10 border border-brand-end/20 flex items-center justify-center shrink-0">
-                <FileSpreadsheet className="text-brand-end" size={24} />
-              </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <h3 className="font-bold text-lg text-white font-outfit tracking-tight">Cloud Sheet Synchronization</h3>
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-green-500/10 border border-green-500/20 text-green-400">
-                    <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse"></span>
-                    AUTOMATED ACTIVE
-                  </span>
-                </div>
-                <p className="text-textSecondary text-xs mt-1 leading-relaxed">
-                  Your reading library in the browser is fully synced and cleaned in real-time. Background sync completes every 45 seconds.
-                </p>
-              </div>
-            </div>
-            
-            <button
-              onClick={() => setShowSetup(prev => !prev)}
-              className="flex items-center justify-center gap-2 px-4 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-white text-xs font-bold transition-all active:scale-95 cursor-pointer"
-            >
-              <Database size={14} />
-              {showSetup ? "Hide Apps Script Setup" : "Verify Apps Script setup"}
-              {showSetup ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-            </button>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs leading-relaxed">
-            <div className="bg-white/[0.02] border border-white/5 rounded-2xl p-4">
-              <span className="font-bold text-white block mb-1">Column Header Safety</span>
-              <p className="text-textSecondary">
-                Auto-initializes essential header columns (<code className="text-[#ff3152]">title</code>, <code className="text-[#ff3152]">originalUrl</code>, etc.) on start. This ensures rows are correctly read and displayed.
-              </p>
-            </div>
-            <div className="bg-white/[0.02] border border-white/5 rounded-2xl p-4">
-              <span className="font-bold text-white block mb-1">Zero-Duplicate Guarantee</span>
-              <p className="text-textSecondary">
-                Detects pre-existing or concurrent duplicate additions inside the sheet and purges duplicate rows automatically while preserving the original feed entry.
-              </p>
-            </div>
-          </div>
-
-          {showSetup && (
-            <div className="mt-6 pt-6 border-t border-white/5 space-y-6 animate-in slide-in-from-top-4 duration-300">
-              <div className="space-y-2 text-xs text-textSecondary text-left">
-                <span className="font-bold text-white text-sm block">How to Install / Update Google Sheet Apps Script:</span>
-                <ol className="list-decimal list-inside space-y-2 leading-relaxed">
-                  <li>Open your connected <span className="text-white font-medium">Google Spreadsheet</span>.</li>
-                  <li>Go to <span className="text-white font-medium">Extensions</span> → <span className="text-white font-medium">Apps Script</span>.</li>
-                  <li>Delete any existing code in the editor, and paste the code snippet below.</li>
-                  <li>Click <span className="text-white font-medium">Deploy</span> → <span className="text-white font-medium">New Deployment</span> → Select type: <span className="text-white font-medium">Web App</span>.</li>
-                  <li>Set Access to: <span className="text-white font-medium">"Anyone"</span> (this is mandatory) and click <span className="text-white font-medium">Deploy</span>.</li>
-                </ol>
-              </div>
-
-              <div className="space-y-2 text-left">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-white font-semibold flex items-center gap-1.5">
-                    <Terminal size={14} className="text-brand-end" /> Code.gs (Recommended Implementation)
-                  </span>
-                  <button
-                    onClick={copyScriptToClipboard}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-brand-end/10 hover:bg-brand-end/20 text-brand-end rounded-lg transition-all active:scale-95 text-xs font-bold cursor-pointer"
-                  >
-                    {copied ? <Check size={12} /> : <Copy size={12} />}
-                    {copied ? "Copied!" : "Copy Code"}
-                  </button>
-                </div>
-                <div className="relative rounded-xl overflow-hidden border border-white/5 bg-[#030303]">
-                  <pre className="p-4 overflow-x-auto text-[11px] font-mono text-gray-300 max-h-72 leading-relaxed selection:bg-white/20 select-text">
-                    {APPS_SCRIPT_CODE}
-                  </pre>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
       </div>
 
       <div className="text-center mt-20 text-textMuted text-sm pb-8 font-medium">
