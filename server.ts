@@ -32,9 +32,12 @@ async function startServer() {
   // --- API PROXY ROUTE ---
   // This allows the frontend to request feeds via the backend, 
   // bypassing browser CORS restrictions and Substack's direct blocks.
-  app.get('/api/proxy', async (req, res) => {
-    const { url } = req.query;
+  app.get('/api/feed', async (req, res) => {
+    const { f } = req.query;
+    const url = f;
+    console.log(`[PROXY] Received request for URL: ${url} from User-Agent: ${req.headers['user-agent']}`);
     if (!url || typeof url !== 'string') {
+      console.log(`[PROXY] Invalid URL provided`);
       return res.status(400).send('URL is required');
     }
 

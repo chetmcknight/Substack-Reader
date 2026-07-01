@@ -194,7 +194,7 @@ const parseRSSXML = (xmlString: string, originalUrl: string): FeedData => {
  */
 const fetchWithRSS2JSON = async (originalUrl: string): Promise<FeedData> => {
     const apiUrl = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(originalUrl)}`;
-    const response = await fetchWithTimeout(apiUrl, {}, 8000);
+    const response = await fetchWithTimeout(apiUrl, {}, 15000);
     
     if (!response.ok) throw new Error("RSS2JSON gateway failed");
     
@@ -226,10 +226,10 @@ const fetchWithRSS2JSON = async (originalUrl: string): Promise<FeedData> => {
  */
 export const fetchAndParseFeed = async (url: string): Promise<FeedData> => {
   // Strategy 1: Local Server Proxy (Best for Online/Production)
-  // This uses the /api/proxy endpoint defined in server.ts
+  // This uses the /api/feed endpoint defined in server.ts
   try {
-    const proxyUrl = `/api/proxy?url=${encodeURIComponent(url)}`;
-    const response = await fetchWithTimeout(proxyUrl, {}, 5000);
+    const proxyUrl = `/api/feed?f=${encodeURIComponent(url)}`;
+    const response = await fetchWithTimeout(proxyUrl, {}, 15000);
     
     // 404 means the proxy endpoint doesn't exist (e.g. static host without backend)
     // 500 means the fetch failed server-side
@@ -246,7 +246,7 @@ export const fetchAndParseFeed = async (url: string): Promise<FeedData> => {
   // Strategy 2: Client-side CORS Proxy (corsproxy.io)
   try {
     const corsProxyUrl = `https://corsproxy.io/?url=${encodeURIComponent(url)}`;
-    const response = await fetchWithTimeout(corsProxyUrl, {}, 6000);
+    const response = await fetchWithTimeout(corsProxyUrl, {}, 12000);
     if (response.ok) {
         const xmlText = await response.text();
         if (xmlText.trim().startsWith('<')) {
@@ -267,7 +267,7 @@ export const fetchAndParseFeed = async (url: string): Promise<FeedData> => {
   // Strategy 4: AllOrigins (Last Resort)
   try {
       const allOriginsUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
-      const response = await fetchWithTimeout(allOriginsUrl, {}, 8000);
+      const response = await fetchWithTimeout(allOriginsUrl, {}, 15000);
       if (response.ok) {
           const data = await response.json();
           if (data.contents && data.contents.trim().startsWith('<')) {
