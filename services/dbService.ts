@@ -25,6 +25,38 @@ const INITIAL_PLACEHOLDERS: LibraryFeed[] = [
 ];
 
 export const dbService = {
+  // Triggers remote initialization actions in the background to set up column headers
+  initializeSheet: async (): Promise<void> => {
+    const actions = ['setup', 'initialize', 'init', 'create_headers'];
+    for (const action of actions) {
+      fetch(APPS_SCRIPT_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'text/plain;charset=utf-8'
+        },
+        body: JSON.stringify({ action })
+      }).catch(err => console.error(`Error sending setup action '${action}':`, err));
+    }
+
+    // Also send a fallback header insert to ensure 'title', 'originalUrl', 'description', 'sourceType' is written 
+    // in case the Apps Script only supports standard appends and starts with an empty sheet.
+    fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'text/plain;charset=utf-8'
+      },
+      body: JSON.stringify({
+        action: 'add',
+        feed: {
+          title: 'title',
+          originalUrl: 'originalUrl',
+          description: 'description',
+          sourceType: 'sourceType'
+        }
+      })
+    }).catch(err => console.error("Error sending fallback headers:", err));
+  },
+
   // Triggers remote deduplication actions in the background
   deduplicateSheet: async (): Promise<void> => {
     const actions = ['deduplicate', 'dedup', 'removeDuplicates', 'remove_duplicates', 'cleanDuplicates', 'delete_duplicates'];
@@ -58,12 +90,16 @@ export const dbService = {
             return INITIAL_PLACEHOLDERS;
           }
 
-          // Deduplicate based on originalUrl (case-insensitive and trimmed)
+          // Deduplicate and filter out any header row values that might be treated as a data record
           const seen = new Set<string>();
           const uniqueData: LibraryFeed[] = [];
           for (const item of result.data) {
             if (item && item.originalUrl) {
               const urlKey = item.originalUrl.trim().toLowerCase();
+              // Skip header row indicators if they are read back as a data item
+              if (urlKey === "originalurl" || urlKey === "url") {
+                continue;
+              }
               if (!seen.has(urlKey)) {
                 seen.add(urlKey);
                 uniqueData.push(item);
@@ -71,7 +107,7 @@ export const dbService = {
             }
           }
 
-          // Trigger remote deduplication in the background
+          // Trigger remote deduplication and auto setup in the background
           dbService.deduplicateSheet().catch(() => {});
 
           // Update local storage cache
@@ -95,6 +131,9 @@ export const dbService = {
           for (const item of parsed) {
             if (item && item.originalUrl) {
               const urlKey = item.originalUrl.trim().toLowerCase();
+              if (urlKey === "originalurl" || urlKey === "url") {
+                continue;
+              }
               if (!seen.has(urlKey)) {
                 seen.add(urlKey);
                 uniqueData.push(item);
@@ -128,6 +167,9 @@ export const dbService = {
       for (const item of library) {
         if (item && item.originalUrl) {
           const urlKey = item.originalUrl.trim().toLowerCase();
+          if (urlKey === "originalurl" || urlKey === "url") {
+            continue;
+          }
           if (!seen.has(urlKey)) {
             seen.add(urlKey);
             uniqueData.push(item);
@@ -153,7 +195,7 @@ export const dbService = {
       })
     }).catch(err => console.error("Error syncing feed addition to Google Sheets:", err));
 
-    // Trigger remote deduplication in the background to clean up pre-existing duplicates
+    // Trigger remote deduplication and auto-setup in the background
     dbService.deduplicateSheet().catch(() => {});
 
     return library;
@@ -178,6 +220,9 @@ export const dbService = {
       for (const item of library) {
         if (item && item.originalUrl) {
           const urlKey = item.originalUrl.trim().toLowerCase();
+          if (urlKey === "originalurl" || urlKey === "url") {
+            continue;
+          }
           if (!seen.has(urlKey)) {
             seen.add(urlKey);
             uniqueData.push(item);
@@ -254,7 +299,7 @@ export const dbService = {
       })
     }).catch(err => console.error("Error syncing feed removal (action: unsafe):", err));
 
-    // Trigger remote deduplication in the background
+    // Trigger remote deduplication and auto-setup in the background
     dbService.deduplicateSheet().catch(() => {});
 
     return library;

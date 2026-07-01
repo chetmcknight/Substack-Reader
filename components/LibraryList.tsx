@@ -2,13 +2,15 @@
 import React, { memo } from 'react';
 import { LibraryFeed } from '../types.ts';
 import { GlassCard } from './GlassCard.tsx';
-import { Trash2, ArrowRight, Rss, RotateCw } from 'lucide-react';
+import { Trash2, ArrowRight, Rss, RotateCw, RefreshCw } from 'lucide-react';
 
 interface LibraryListProps {
   feeds: LibraryFeed[];
   onSelect: (url: string) => void;
   onRemove: (e: React.MouseEvent, url: string) => void;
   onRefresh: (url: string) => void;
+  onSyncSheet?: () => Promise<void>;
+  isSyncingSheet?: boolean;
 }
 
 const LibraryItem = memo(({ 
@@ -71,14 +73,32 @@ const LibraryItem = memo(({
   );
 });
 
-export const LibraryList: React.FC<LibraryListProps> = ({ feeds, onSelect, onRemove, onRefresh }) => {
+export const LibraryList: React.FC<LibraryListProps> = ({ 
+  feeds, 
+  onSelect, 
+  onRemove, 
+  onRefresh,
+  onSyncSheet,
+  isSyncingSheet
+}) => {
   if (feeds.length === 0) return null;
 
   return (
     <div className="w-full max-w-5xl mx-auto pb-20 px-4 md:px-0">
-      <div className="mb-10 text-center">
+      <div className="mb-10 text-center relative flex flex-col items-center">
          <h2 className="text-2xl font-bold text-white mb-2">Your Library</h2>
-         <p className="text-textSecondary">Access your saved Substack feeds instantly.</p>
+         <p className="text-textSecondary mb-4">Access your saved Substack feeds instantly.</p>
+         {onSyncSheet && (
+           <button
+             onClick={onSyncSheet}
+             disabled={isSyncingSheet}
+             className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-brand-end hover:text-white bg-brand-end/10 hover:bg-brand-end/25 border border-brand-end/20 rounded-full transition-all duration-300 active:scale-95 disabled:opacity-50 cursor-pointer"
+             id="sync-sheet-btn"
+           >
+             <RefreshCw size={12} className={`${isSyncingSheet ? 'animate-spin' : ''}`} />
+             {isSyncingSheet ? 'Syncing & Clean-up Active...' : 'Sync & Clean Google Sheet'}
+           </button>
+         )}
       </div>
       
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
