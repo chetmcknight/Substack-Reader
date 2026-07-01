@@ -114,6 +114,21 @@ export const dbService = {
     }
 
     // 2. Async sync with Google Sheet in the background (no-preflight simple request)
+    // We send a highly robust payload with multiple common properties (url, originalUrl, feedUrl, etc.)
+    // and fire fallbacks for multiple possible action names ('remove', 'delete', 'unsave', 'unsafe')
+    // to guarantee it matches whatever structure the Apps Script is expecting.
+    const payload = {
+      url: url,
+      originalUrl: url,
+      feedUrl: url,
+      feed: {
+        url: url,
+        originalUrl: url,
+        feedUrl: url
+      }
+    };
+
+    // Send action: 'remove'
     fetch(APPS_SCRIPT_URL, {
       method: 'POST',
       headers: {
@@ -121,9 +136,45 @@ export const dbService = {
       },
       body: JSON.stringify({
         action: 'remove',
-        originalUrl: url
+        ...payload
       })
-    }).catch(err => console.error("Error syncing feed removal from Google Sheets:", err));
+    }).catch(err => console.error("Error syncing feed removal (action: remove):", err));
+
+    // Send action: 'delete'
+    fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'text/plain;charset=utf-8'
+      },
+      body: JSON.stringify({
+        action: 'delete',
+        ...payload
+      })
+    }).catch(err => console.error("Error syncing feed removal (action: delete):", err));
+
+    // Send action: 'unsave'
+    fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'text/plain;charset=utf-8'
+      },
+      body: JSON.stringify({
+        action: 'unsave',
+        ...payload
+      })
+    }).catch(err => console.error("Error syncing feed removal (action: unsave):", err));
+
+    // Send action: 'unsafe'
+    fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'text/plain;charset=utf-8'
+      },
+      body: JSON.stringify({
+        action: 'unsafe',
+        ...payload
+      })
+    }).catch(err => console.error("Error syncing feed removal (action: unsafe):", err));
 
     return library;
   }
