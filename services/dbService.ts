@@ -5,15 +5,25 @@ const APPS_SCRIPT_URL = '/api/sheet';
 
 const INITIAL_PLACEHOLDERS: LibraryFeed[] = [];
 
+const getHeaders = (contentType?: string): Record<string, string> => {
+  const headers: Record<string, string> = {};
+  if (contentType) {
+    headers['Content-Type'] = contentType;
+  }
+  const customUrl = localStorage.getItem('stackreader_apps_script_url');
+  if (customUrl) {
+    headers['x-apps-script-url'] = customUrl;
+  }
+  return headers;
+};
+
 export const dbService = {
   // Triggers remote initialization action in the background to set up column headers
   initializeSheet: async (): Promise<void> => {
     try {
       const response = await fetch(APPS_SCRIPT_URL, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
+        headers: getHeaders('application/json'),
         body: JSON.stringify({ action: 'setup' })
       });
       if (!response.ok) {
@@ -29,9 +39,7 @@ export const dbService = {
     try {
       const response = await fetch(APPS_SCRIPT_URL, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
+        headers: getHeaders('application/json'),
         body: JSON.stringify({ action: 'deduplicate' })
       });
       if (!response.ok) {
@@ -49,7 +57,8 @@ export const dbService = {
       const timeoutId = setTimeout(() => controller.abort(), 4000);
 
       const response = await fetch(APPS_SCRIPT_URL, {
-        signal: controller.signal
+        signal: controller.signal,
+        headers: getHeaders()
       });
       clearTimeout(timeoutId);
 
@@ -58,7 +67,7 @@ export const dbService = {
 
         // Diagnostic check for Google Apps Script TypeError
         if (text.includes("TypeError") || text.includes("setHeaders") || text.includes("is not a function")) {
-          console.error("Detected Google Apps Script Type Error in response:", text);
+          console.warn("Handled Apps Script response mismatch - error page detected. Diagnostic flag set.");
           localStorage.setItem("sheet_error_diagnostic", "true");
         } else {
           localStorage.removeItem("sheet_error_diagnostic");
@@ -83,11 +92,44 @@ export const dbService = {
                 let description = "";
 
                 if (Array.isArray(item)) {
-                  // Raw row format: [Title, Description, FeedUrl, OriginalUrl, LogoUrl, LastUpdated]
-                  title = String(item[0] || "").trim();
-                  description = String(item[1] || "").trim();
-                  originalUrl = String(item[3] || item[2] || item[0] || "").trim();
-                  image = String(item[4] || "").trim();
+                  // Resilient array row parser - searches elements to find fields dynamically
+                  const urls = item.map(v => String(v || '').trim()).filter(v => v.startsWith('http://') || v.startsWith('https://'));
+                  
+                  // Image URL is usually a URL with an image extension or keywords
+                  const imageUrls = urls.filter(v => 
+                    v.toLowerCase().match(/\.(jpeg|jpg|gif|png|svg|webp)/i) || 
+                    v.toLowerCase().includes('logo') || 
+                    v.toLowerCase().includes('avatar') || 
+                    v.toLowerCase().includes('image')
+                  );
+                  
+                  const nonImageUrls = urls.filter(v => !imageUrls.includes(v));
+
+                  if (nonImageUrls.length > 0) {
+                    originalUrl = nonImageUrls[0];
+                  } else if (urls.length > 0) {
+                    originalUrl = urls[0];
+                  }
+
+                  if (imageUrls.length > 0) {
+                    image = imageUrls[0];
+                  }
+
+                  const nonUrlStrings = item.map(v => String(v || '').trim()).filter(v => v && !v.startsWith('http'));
+                  if (nonUrlStrings.length > 0) {
+                    title = nonUrlStrings[0];
+                    if (nonUrlStrings.length > 1) {
+                      description = nonUrlStrings[1];
+                    }
+                  }
+
+                  // Standard fallbacks if column parsing didn't find them:
+                  if (!title && item[0]) title = String(item[0]).trim();
+                  if (!description && item[1]) description = String(item[1]).trim();
+                  if (!originalUrl) {
+                    originalUrl = String(item[3] || item[2] || item[0] || "").trim();
+                  }
+                  if (!image && item[4]) image = String(item[4]).trim();
                 } else if (typeof item === 'object') {
                   // Flexible object key mapping supporting camelCase, lowercase, TitleCase, etc.
                   title = String(item.title || item.Title || item.name || item.Name || "").trim();
@@ -113,6 +155,19 @@ export const dbService = {
                     item.Logo || 
                     ""
                   ).trim();
+
+                  // Robust fallback - search all object properties for any URL
+                  if (!originalUrl) {
+                    for (const key of Object.keys(item)) {
+                      const val = String((item as any)[key] || '').trim();
+                      if (val.startsWith('http://') || val.startsWith('https://')) {
+                        if (!val.toLowerCase().match(/\.(jpeg|jpg|gif|png|svg|webp)/i) && !key.toLowerCase().includes('logo')) {
+                          originalUrl = val;
+                          break;
+                        }
+                      }
+                    }
+                  }
                 }
 
                 if (originalUrl) {
@@ -228,9 +283,7 @@ export const dbService = {
     // 2. Async sync with Google Sheet in the background (no-preflight simple request)
     fetch(APPS_SCRIPT_URL, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
+      headers: getHeaders('application/json'),
       body: JSON.stringify({
         action: 'add',
         feed: feed
@@ -282,9 +335,7 @@ export const dbService = {
     // Send a single highly robust payload with all common URL parameter formats
     fetch(APPS_SCRIPT_URL, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
+      headers: getHeaders('application/json'),
       body: JSON.stringify({
         action: 'remove',
         url: url,

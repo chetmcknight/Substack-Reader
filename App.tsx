@@ -5,10 +5,11 @@ import { FeedView } from './components/FeedView.tsx';
 import { LibraryList } from './components/LibraryList.tsx';
 import { ArticleModal } from './components/ArticleModal.tsx';
 import { LoadingOverlay } from './components/LoadingOverlay.tsx';
+import { SyncSettingsModal } from './components/SyncSettingsModal.tsx';
 import { normalizeInputToFeedUrl, fetchAndParseFeed } from './services/rssService.ts';
 import { dbService } from './services/dbService.ts';
 import { FeedData, LoadingState, LibraryFeed, FeedItem } from './types.ts';
-import { AlertCircle, RefreshCcw } from 'lucide-react';
+import { AlertCircle, RefreshCcw, Settings } from 'lucide-react';
 
 const App: React.FC = () => {
   const [loadingState, setLoadingState] = useState<LoadingState>(LoadingState.IDLE);
@@ -32,10 +33,22 @@ const App: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [readingItem, setReadingItem] = useState<FeedItem | null>(null);
   const [isSyncingSheet, setIsSyncingSheet] = useState(false);
+  const [showSyncModal, setShowSyncModal] = useState(false);
+  const [hasSyncError, setHasSyncError] = useState(false);
   
   // Enforce Dark Mode
   useEffect(() => {
     document.documentElement.classList.add('dark');
+  }, []);
+
+  // Sync state with localStorage diagnostic
+  useEffect(() => {
+    const checkError = () => {
+      setHasSyncError(localStorage.getItem("sheet_error_diagnostic") === "true");
+    };
+    checkError();
+    const interval = setInterval(checkError, 2500);
+    return () => clearInterval(interval);
   }, []);
 
   // Load library on mount and perform automated Sync & Clean-up
@@ -184,6 +197,18 @@ const App: React.FC = () => {
     }
   }, []);
 
+  const handleSaveSyncSettings = useCallback(async () => {
+    setIsSyncingSheet(true);
+    try {
+      const freshLibrary = await dbService.getLibrary();
+      setLibrary(freshLibrary);
+    } catch (e) {
+      console.error("Error refreshing library after settings change:", e);
+    } finally {
+      setIsSyncingSheet(false);
+    }
+  }, []);
+
   const closeFeed = useCallback((url: string) => {
     setActiveFeeds(prev => prev.filter(f => f.originalUrl !== url));
   }, []);
@@ -210,6 +235,12 @@ const App: React.FC = () => {
       <ArticleModal 
         item={readingItem}
         onClose={() => setReadingItem(null)}
+      />
+
+      <SyncSettingsModal 
+        isOpen={showSyncModal}
+        onClose={() => setShowSyncModal(false)}
+        onSave={handleSaveSyncSettings}
       />
 
       <div className="relative z-10 max-w-7xl mx-auto flex flex-col items-center">
@@ -273,6 +304,42 @@ const App: React.FC = () => {
             </div>
         )}
 
+        {/* Google Sheets Sync Error Banner */}
+        {hasSyncError && (
+          <div className="w-full max-w-4xl mx-auto mb-12 p-6 md:p-8 rounded-[24px] bg-[#0E0F12] border border-amber-500/20 shadow-[0_20px_40px_rgba(245,158,11,0.05)] text-left animate-in fade-in duration-500 relative z-20">
+            <div className="flex flex-col md:flex-row items-start gap-4">
+              <div className="w-12 h-12 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center shrink-0">
+                <AlertCircle className="text-amber-500" size={24} />
+              </div>
+              <div className="space-y-3 flex-1">
+                <h3 className="text-lg font-bold text-white font-outfit tracking-tight">Google Sheets Sync Conflict Detected</h3>
+                <p className="text-sm text-textSecondary leading-relaxed">
+                  The Google Apps Script deployed in your Google Sheet is throwing a <code className="text-amber-400 font-mono bg-white/5 px-1 py-0.5 rounded">TypeError: setHeaders is not a function</code> on Google's servers. 
+                  Because our proxy handles CORS automatically, you don't need any custom headers in your script.
+                </p>
+                <div className="flex flex-wrap items-center gap-3 pt-2">
+                  <button
+                    onClick={() => setShowSyncModal(true)}
+                    className="px-4 py-2 bg-amber-500 text-black font-bold text-xs rounded-xl hover:bg-amber-400 transition-colors active:scale-95 cursor-pointer flex items-center gap-1.5"
+                  >
+                    <Settings size={13} />
+                    View & Copy Fixed Code
+                  </button>
+                  <button
+                    onClick={() => {
+                      localStorage.removeItem("sheet_error_diagnostic");
+                      setHasSyncError(false);
+                    }}
+                    className="px-4 py-2 bg-white/5 text-textSecondary hover:text-white font-bold text-xs rounded-xl hover:bg-white/10 transition-colors active:scale-95 cursor-pointer"
+                  >
+                    Dismiss Warning
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Library Section */}
         <LibraryList 
             feeds={library} 
@@ -284,8 +351,15 @@ const App: React.FC = () => {
         />
       </div>
 
-      <div className="text-center mt-20 text-textMuted text-sm pb-8 font-medium">
+      <div className="text-center mt-20 text-textMuted text-sm pb-8 font-medium flex flex-col items-center gap-3">
         <p>© 2026 StackReader Pro • Built for Speed</p>
+        <button 
+          onClick={() => setShowSyncModal(true)}
+          className="text-textSecondary hover:text-brand-end transition-colors text-xs flex items-center gap-1.5 bg-white/5 hover:bg-white/10 px-3.5 py-2 rounded-full border border-white/5 hover:border-brand-end/20 cursor-pointer active:scale-95 transition-all font-semibold shadow-sm"
+        >
+          <Settings size={13} />
+          Google Sheets Sync Settings
+        </button>
       </div>
     </div>
   );

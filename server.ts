@@ -111,7 +111,10 @@ async function startServer() {
   // --- GOOGLE SHEETS PROXY ---
   // Proxies requests to Google Apps Script to bypass strict browser/mobile CORS and ITP restrictions.
   app.all('/api/sheet', async (req, res) => {
-    const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwF4gAkG3fpyIh3qvUttjeJcnZvmhOOXI_yTzx-IbqkRRDqkFafVuyU2g5FY2yjsSDu/exec';
+    const customUrl = req.headers['x-apps-script-url'] || req.query.apps_script_url;
+    const APPS_SCRIPT_URL = (typeof customUrl === 'string' && customUrl.startsWith('https://'))
+      ? customUrl 
+      : 'https://script.google.com/macros/s/AKfycbwF4gAkG3fpyIh3qvUttjeJcnZvmhOOXI_yTzx-IbqkRRDqkFafVuyU2g5FY2yjsSDu/exec';
     
     try {
       if (req.method === 'GET') {
