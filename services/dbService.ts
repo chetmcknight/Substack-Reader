@@ -1,4 +1,3 @@
-
 import { LibraryFeed } from '../types.ts';
 
 const STORAGE_KEY = 'stackreader_library';
@@ -26,6 +25,20 @@ const INITIAL_PLACEHOLDERS: LibraryFeed[] = [
 ];
 
 export const dbService = {
+  // Triggers remote deduplication actions in the background
+  deduplicateSheet: async (): Promise<void> => {
+    const actions = ['deduplicate', 'dedup', 'removeDuplicates', 'remove_duplicates', 'cleanDuplicates', 'delete_duplicates'];
+    for (const action of actions) {
+      fetch(APPS_SCRIPT_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'text/plain;charset=utf-8'
+        },
+        body: JSON.stringify({ action })
+      }).catch(err => console.error(`Error sending background action '${action}':`, err));
+    }
+  },
+
   getLibrary: async (): Promise<LibraryFeed[]> => {
     try {
       // Fetch from Google Sheets Apps Script with a timeout
@@ -44,9 +57,26 @@ export const dbService = {
           if (result.data.length === 0) {
             return INITIAL_PLACEHOLDERS;
           }
+
+          // Deduplicate based on originalUrl (case-insensitive and trimmed)
+          const seen = new Set<string>();
+          const uniqueData: LibraryFeed[] = [];
+          for (const item of result.data) {
+            if (item && item.originalUrl) {
+              const urlKey = item.originalUrl.trim().toLowerCase();
+              if (!seen.has(urlKey)) {
+                seen.add(urlKey);
+                uniqueData.push(item);
+              }
+            }
+          }
+
+          // Trigger remote deduplication in the background
+          dbService.deduplicateSheet().catch(() => {});
+
           // Update local storage cache
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(result.data));
-          return result.data;
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(uniqueData));
+          return uniqueData;
         }
       }
     } catch (e) {
@@ -59,7 +89,19 @@ export const dbService = {
       if (stored) {
         const parsed = JSON.parse(stored);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed;
+          // Deduplicate local storage fallback as well
+          const seen = new Set<string>();
+          const uniqueData: LibraryFeed[] = [];
+          for (const item of parsed) {
+            if (item && item.originalUrl) {
+              const urlKey = item.originalUrl.trim().toLowerCase();
+              if (!seen.has(urlKey)) {
+                seen.add(urlKey);
+                uniqueData.push(item);
+              }
+            }
+          }
+          return uniqueData;
         }
       }
     } catch (e) {
@@ -75,8 +117,25 @@ export const dbService = {
     try {
       const stored = localStorage.getItem(STORAGE_KEY);
       library = stored ? JSON.parse(stored) : [...INITIAL_PLACEHOLDERS];
-      library = library.filter(f => f.originalUrl !== feed.originalUrl);
+      
+      // Filter out matching URL
+      library = library.filter(f => f && f.originalUrl && f.originalUrl.trim().toLowerCase() !== feed.originalUrl.trim().toLowerCase());
       library.unshift(feed);
+
+      // Deduplicate
+      const seen = new Set<string>();
+      const uniqueData: LibraryFeed[] = [];
+      for (const item of library) {
+        if (item && item.originalUrl) {
+          const urlKey = item.originalUrl.trim().toLowerCase();
+          if (!seen.has(urlKey)) {
+            seen.add(urlKey);
+            uniqueData.push(item);
+          }
+        }
+      }
+      library = uniqueData;
+
       localStorage.setItem(STORAGE_KEY, JSON.stringify(library));
     } catch (e) {
       console.error("Error adding to local library", e);
@@ -94,6 +153,9 @@ export const dbService = {
       })
     }).catch(err => console.error("Error syncing feed addition to Google Sheets:", err));
 
+    // Trigger remote deduplication in the background to clean up pre-existing duplicates
+    dbService.deduplicateSheet().catch(() => {});
+
     return library;
   },
 
@@ -107,7 +169,23 @@ export const dbService = {
       } else {
         library = [...INITIAL_PLACEHOLDERS];
       }
-      library = library.filter(f => f.originalUrl !== url);
+      const cleanUrl = url.trim().toLowerCase();
+      library = library.filter(f => f && f.originalUrl && f.originalUrl.trim().toLowerCase() !== cleanUrl);
+
+      // Deduplicate
+      const seen = new Set<string>();
+      const uniqueData: LibraryFeed[] = [];
+      for (const item of library) {
+        if (item && item.originalUrl) {
+          const urlKey = item.originalUrl.trim().toLowerCase();
+          if (!seen.has(urlKey)) {
+            seen.add(urlKey);
+            uniqueData.push(item);
+          }
+        }
+      }
+      library = uniqueData;
+
       localStorage.setItem(STORAGE_KEY, JSON.stringify(library));
     } catch (e) {
       console.error("Error removing from local library", e);
@@ -175,6 +253,9 @@ export const dbService = {
         ...payload
       })
     }).catch(err => console.error("Error syncing feed removal (action: unsafe):", err));
+
+    // Trigger remote deduplication in the background
+    dbService.deduplicateSheet().catch(() => {});
 
     return library;
   }
