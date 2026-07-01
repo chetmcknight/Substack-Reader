@@ -1,7 +1,7 @@
 import { LibraryFeed } from '../types.ts';
 
 const STORAGE_KEY = 'stackreader_library';
-const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbw0IqNd1yiUAHIn8sX67hgGH3hTmLs-_pzXrPywhorMxMSuA3zBaN6osIX2ooO3iNhL/exec';
+const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwF4gAkG3fpyIh3qvUttjeJcnZvmhOOXI_yTzx-IbqkRRDqkFafVuyU2g5FY2yjsSDu/exec';
 
 const INITIAL_PLACEHOLDERS: LibraryFeed[] = [
   {
