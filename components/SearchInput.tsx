@@ -1,7 +1,8 @@
 
 import React from 'react';
-import { Loader2, ArrowRight, Rss } from 'lucide-react';
+import { Loader2, ArrowRight } from 'lucide-react';
 import { GlassCard } from './GlassCard.tsx';
+import { SubstackIcon } from './FeedHeader.tsx';
 
 interface SearchInputProps {
   onSearch: (input: string) => void;
@@ -32,7 +33,7 @@ export const SearchInput: React.FC<SearchInputProps> = ({ onSearch, isLoading, v
                 StackReader <span className="inline-block text-transparent bg-clip-text bg-gradient-to-r from-brand-start to-brand-end pr-1">Pro</span>
             </h2>
             <div className="w-10 h-10 rounded-full bg-gradient-to-r from-brand-start to-brand-end flex items-center justify-center shadow-[0_0_15px_-3px_rgba(255,59,92,0.4)]">
-                <Rss size={20} className="text-white" />
+                <SubstackIcon size={20} className="text-white" />
             </div>
         </div>
 

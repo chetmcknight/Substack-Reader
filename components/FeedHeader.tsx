@@ -12,7 +12,7 @@ interface FeedHeaderProps {
 }
 
 // Simple Substack Icon Component
-const SubstackIcon = ({ size = 16, className = "" }: { size?: number, className?: string }) => (
+export const SubstackIcon = ({ size = 16, className = "" }: { size?: number, className?: string }) => (
   <svg 
     width={size} 
     height={size} 
