@@ -1,4 +1,5 @@
 
+// Force re-scan
 import React, { useState, useEffect, useCallback } from 'react';
 import { SearchInput } from './components/SearchInput.tsx';
 import { FeedView } from './components/FeedView.tsx';

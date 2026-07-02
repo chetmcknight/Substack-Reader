@@ -20,7 +20,7 @@ const getHeaders = (contentType?: string): Record<string, string> => {
 const isSyncEnabled = (): boolean => {
   const customUrl = localStorage.getItem('stackreader_apps_script_url');
   if (customUrl === 'disabled') return false;
-  if (!customUrl) return true; // Default to true to use the built-in server default
+  // If no custom URL, we cannot sync as the backend is not configured.
   return typeof customUrl === 'string' && customUrl.trim().startsWith('https://');
 };
 
