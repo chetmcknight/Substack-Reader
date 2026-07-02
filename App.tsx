@@ -33,24 +33,12 @@ const App: React.FC = () => {
   const [readingItem, setReadingItem] = useState<FeedItem | null>(null);
   const [isSyncingSheet, setIsSyncingSheet] = useState(false);
   const [showSyncModal, setShowSyncModal] = useState(false);
-  const [hasSyncError, setHasSyncError] = useState(false);
-
   const activeFeedsRef = useRef(activeFeeds);
   activeFeedsRef.current = activeFeeds;
   
   // Enforce Dark Mode
   useEffect(() => {
     document.documentElement.classList.add('dark');
-  }, []);
-
-  // Sync state with localStorage diagnostic
-  useEffect(() => {
-    const checkError = () => {
-      setHasSyncError(localStorage.getItem("sheet_error_diagnostic") === "true");
-    };
-    checkError();
-    window.addEventListener('storage', checkError);
-    return () => window.removeEventListener('storage', checkError);
   }, []);
 
   // Load library on mount and perform automated Sync & Clean-up
@@ -322,42 +310,6 @@ const App: React.FC = () => {
                 />
             ))}
             </div>
-        )}
-
-        {/* Google Sheets Sync Error Banner */}
-        {hasSyncError && (
-          <div className="w-full max-w-4xl mx-auto mb-12 p-6 md:p-8 rounded-[24px] bg-[#0E0F12] border border-amber-500/20 shadow-[0_20px_40px_rgba(245,158,11,0.05)] text-left animate-in fade-in duration-500 relative z-20">
-            <div className="flex flex-col md:flex-row items-start gap-4">
-              <div className="w-12 h-12 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center shrink-0">
-                <AlertCircle className="text-amber-500" size={24} />
-              </div>
-              <div className="space-y-3 flex-1">
-                <h3 className="text-lg font-bold text-white font-outfit tracking-tight">Google Sheets Sync Conflict Detected</h3>
-                <p className="text-sm text-textSecondary leading-relaxed">
-                  The Google Apps Script deployed in your Google Sheet is throwing a <code className="text-amber-400 font-mono bg-white/5 px-1 py-0.5 rounded">TypeError: setHeaders is not a function</code> on Google's servers. 
-                  Because our proxy handles CORS automatically, you don't need any custom headers in your script.
-                </p>
-                <div className="flex flex-wrap items-center gap-3 pt-2">
-                  <button
-                    onClick={() => setShowSyncModal(true)}
-                    className="px-4 py-2 bg-amber-500 text-black font-bold text-xs rounded-xl hover:bg-amber-400 transition-colors active:scale-95 cursor-pointer flex items-center gap-1.5"
-                  >
-                    <Settings size={13} />
-                    View & Copy Fixed Code
-                  </button>
-                  <button
-                    onClick={() => {
-                      localStorage.removeItem("sheet_error_diagnostic");
-                      setHasSyncError(false);
-                    }}
-                    className="px-4 py-2 bg-white/5 text-textSecondary hover:text-white font-bold text-xs rounded-xl hover:bg-white/10 transition-colors active:scale-95 cursor-pointer"
-                  >
-                    Dismiss Warning
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
         )}
 
         {/* Library Section */}
