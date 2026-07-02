@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useCallback, memo } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { SearchInput } from './components/SearchInput.tsx';
 import { FeedView } from './components/FeedView.tsx';
 import { LibraryList } from './components/LibraryList.tsx';
@@ -47,8 +47,8 @@ const App: React.FC = () => {
       setHasSyncError(localStorage.getItem("sheet_error_diagnostic") === "true");
     };
     checkError();
-    const interval = setInterval(checkError, 2500);
-    return () => clearInterval(interval);
+    window.addEventListener('storage', checkError);
+    return () => window.removeEventListener('storage', checkError);
   }, []);
 
   // Load library on mount and perform automated Sync & Clean-up
@@ -116,21 +116,21 @@ const App: React.FC = () => {
         return [data, ...prev]; 
       });
       
-      const inLibrary = library.some(l => l.originalUrl === url);
-      if (inLibrary) {
-          const libEntry: LibraryFeed = {
-              title: data.title,
-              originalUrl: data.originalUrl,
-              image: data.image,
-              description: data.description,
-              sourceType: data.sourceType
-          };
-          await dbService.addToLibrary(libEntry);
-          setLibrary(prev => {
+      setLibrary(prev => {
+          const inLibrary = prev.some(l => l.originalUrl === url);
+          if (inLibrary) {
+              const libEntry: LibraryFeed = {
+                  title: data.title,
+                  originalUrl: data.originalUrl,
+                  image: data.image,
+                  description: data.description,
+                  sourceType: data.sourceType
+              };
               const filtered = prev.filter(l => l.originalUrl !== url);
               return [libEntry, ...filtered];
-          });
-      }
+          }
+          return prev;
+      });
 
       setLoadingState(LoadingState.SUCCESS);
       setSearchQuery('');
@@ -145,7 +145,7 @@ const App: React.FC = () => {
       setErrorMsg(message);
       setLoadingState(LoadingState.ERROR);
     }
-  }, [activeFeeds, library]);
+  }, [activeFeeds]);
 
   const handleSearch = useCallback((input: string) => {
     if (!input.trim()) return;
@@ -154,11 +154,29 @@ const App: React.FC = () => {
   }, [addFeedToView]);
 
   const toggleLibrarySave = useCallback(async (feed: FeedData) => {
-    try {
-      const exists = library.some(item => item.originalUrl === feed.originalUrl);
+    let exists = false;
+    let oldLibrary: LibraryFeed[] = [];
+    
+    setLibrary(prev => {
+      oldLibrary = prev;
+      exists = prev.some(item => item.originalUrl === feed.originalUrl);
       
       if (exists) {
-        setLibrary(prev => prev.filter(item => item.originalUrl !== feed.originalUrl));
+        return prev.filter(item => item.originalUrl !== feed.originalUrl);
+      } else {
+        const newFeed: LibraryFeed = {
+          title: feed.title,
+          originalUrl: feed.originalUrl,
+          image: feed.image,
+          description: feed.description,
+          sourceType: feed.sourceType
+        };
+        return [newFeed, ...prev];
+      }
+    });
+
+    try {
+      if (exists) {
         await dbService.removeFromLibrary(feed.originalUrl);
       } else {
         const newFeed: LibraryFeed = {
@@ -168,19 +186,29 @@ const App: React.FC = () => {
           description: feed.description,
           sourceType: feed.sourceType
         };
-        setLibrary(prev => [newFeed, ...prev]);
         await dbService.addToLibrary(newFeed);
       }
     } catch (e) {
       console.error("Failed to update library", e);
+      setLibrary(oldLibrary);
     }
-  }, [library]);
+  }, []);
 
   const removeFromLibrary = useCallback(async (e: React.MouseEvent, url: string) => {
     e.stopPropagation();
     
-    setLibrary(prev => prev.filter(item => item.originalUrl !== url));
-    await dbService.removeFromLibrary(url);
+    let oldLibrary: LibraryFeed[] = [];
+    setLibrary(prev => {
+      oldLibrary = prev;
+      return prev.filter(item => item.originalUrl !== url);
+    });
+    
+    try {
+      await dbService.removeFromLibrary(url);
+    } catch (err) {
+      console.error("Failed to remove from library", err);
+      setLibrary(oldLibrary);
+    }
   }, []);
 
   const handleSyncSheet = useCallback(async () => {

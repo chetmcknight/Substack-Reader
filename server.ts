@@ -27,7 +27,7 @@ async function startServer() {
   };
 
   // Enable JSON body parsing for API requests
-  app.use(express.json());
+  app.use(express.json({ limit: '50mb' }));
 
   // --- API PROXY ROUTE ---
   // This allows the frontend to request feeds via the backend, 
@@ -36,9 +36,9 @@ async function startServer() {
     const { f } = req.query;
     const url = f;
     console.log(`[PROXY] Received request for URL: ${url} from User-Agent: ${req.headers['user-agent']}`);
-    if (!url || typeof url !== 'string') {
+    if (!url || typeof url !== 'string' || !url.startsWith('https://')) {
       console.log(`[PROXY] Invalid URL provided`);
-      return res.status(400).send('URL is required');
+      return res.status(400).send('Valid HTTPS URL is required');
     }
 
     const fetchWithFallback = async () => {
@@ -113,59 +113,29 @@ async function startServer() {
     }
   });
 
-  // --- REDIRECT PRESERVING FETCH FOR GOOGLE APPS SCRIPT ---
-  // Node's native fetch changes POST to GET on a 302 Found response, which strips the POST payload.
-  // This helper manually follows redirects while preserving the original method and body.
-  const fetchWithRedirects = async (url: string, options: any = {}, maxRedirects = 5): Promise<Response> => {
-    let currentUrl = url;
-    const currentOptions = { ...options };
-
-    for (let i = 0; i < maxRedirects; i++) {
-      const response = await fetch(currentUrl, {
-        ...currentOptions,
-        signal: AbortSignal.timeout(10000), // Prevent hanging
-        redirect: 'manual'
-      });
-
-      const isRedirect = [301, 302, 303, 307, 308].includes(response.status);
-      if (isRedirect) {
-        const location = response.headers.get('location');
-        if (!location) {
-          return response;
-        }
-        currentUrl = new URL(location, currentUrl).toString();
-
-        if (response.status === 303) {
-          currentOptions.method = 'GET';
-          delete currentOptions.body;
-          if (currentOptions.headers) {
-            delete currentOptions.headers['Content-Type'];
-            delete currentOptions.headers['content-type'];
-          }
-        }
-      } else {
-        return response;
-      }
-    }
-
-    throw new Error(`Too many redirects (max: ${maxRedirects})`);
-  };
-
   // --- GOOGLE SHEETS PROXY ---
   // Proxies requests to Google Apps Script to bypass strict browser/mobile CORS and ITP restrictions.
   app.all('/api/sheet', async (req, res) => {
     const customUrl = req.headers['x-apps-script-url'] || req.query.apps_script_url;
     const APPS_SCRIPT_URL = (typeof customUrl === 'string' && customUrl.startsWith('https://'))
       ? customUrl 
-      : 'https://script.google.com/macros/s/AKfycbwF4gAkG3fpyIh3qvUttjeJcnZvmhOOXI_yTzx-IbqkRRDqkFafVuyU2g5FY2yjsSDu/exec';
+      : process.env.APPS_SCRIPT_URL;
+
+    if (!APPS_SCRIPT_URL) {
+      return res.status(500).json({ status: 'error', message: 'Apps Script URL not configured' });
+    }
     
     try {
       if (req.method === 'GET') {
-        const response = await fetchWithRedirects(APPS_SCRIPT_URL, {
-          method: 'GET'
+        const response = await fetch(APPS_SCRIPT_URL, {
+          method: 'GET',
+          signal: AbortSignal.timeout(15000)
         });
         if (!response.ok) {
-          throw new Error(`Google Sheets fetch failed with status ${response.status}`);
+          const errorText = await response.text().catch(() => 'no text');
+          console.error(`Apps script get failed. Status: ${response.status}. Body: ${errorText}`);
+          const shortError = errorText.length > 200 ? errorText.substring(0, 200) + '...' : errorText;
+          throw new Error(`Google Sheets fetch failed with status ${response.status}. Details: ${shortError}`);
         }
         const text = await response.text();
         try {
@@ -176,15 +146,21 @@ async function startServer() {
           return res.send(text);
         }
       } else if (req.method === 'POST') {
-        const response = await fetchWithRedirects(APPS_SCRIPT_URL, {
+        const response = await fetch(APPS_SCRIPT_URL, {
           method: 'POST',
           headers: {
             'Content-Type': 'text/plain;charset=utf-8'
           },
-          body: JSON.stringify(req.body)
+          body: JSON.stringify(req.body),
+          signal: AbortSignal.timeout(15000)
         });
         if (!response.ok) {
-          throw new Error(`Google Sheets post failed with status ${response.status}`);
+          const errorText = await response.text().catch(() => 'no text');
+          console.error(`Apps script post failed. Status: ${response.status}. Body: ${errorText}`);
+          
+          // Truncate the error text if it's too long (e.g. an HTML error page)
+          const shortError = errorText.length > 200 ? errorText.substring(0, 200) + '...' : errorText;
+          throw new Error(`Google Sheets post failed with status ${response.status}. Details: ${shortError}`);
         }
         const text = await response.text();
         try {
@@ -230,7 +206,7 @@ async function startServer() {
       `;
 
       const response = await ai.models.generateContent({
-        model: 'gemini-3.5-flash',
+        model: 'gemini-1.5-flash',
         contents: prompt,
         config: {
           responseMimeType: "application/json",
