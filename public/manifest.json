@@ -1,0 +1,22 @@
+{
+  "name": "StackReader Pro",
+  "short_name": "StackReader",
+  "description": "Professional-grade Substack RSS reader and AI analyzer. Distraction-free, atmospheric, and lightning fast.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#050505",
+  "theme_color": "#050505",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' rx='32' fill='%23FF3B5C'/%3E%3Cpath d='M56 48h80v16H56zM56 80h80v16H56zM56 112h80l-40 36-40-36v-32z' fill='white'/%3E%3C/svg%3E",
+      "sizes": "192x192",
+      "type": "image/svg+xml"
+    },
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='80' fill='%23FF3B5C'/%3E%3Cpath d='M149 128h213v42H149zM149 213h213v42H149zM149 298h213l-106 96-107-96v-85z' fill='white'/%3E%3C/svg%3E",
+      "sizes": "512x512",
+      "type": "image/svg+xml"
+    }
+  ]
+}

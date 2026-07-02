@@ -1,401 +1,233 @@
 import { LibraryFeed } from '../types.ts';
 
 const STORAGE_KEY = 'stackreader_library';
-const APPS_SCRIPT_URL = '/api/sheet';
+const SHEET_PROXY = '/api/sheet';
 
-const INITIAL_PLACEHOLDERS: LibraryFeed[] = [];
-
-const getHeaders = (contentType?: string): Record<string, string> => {
-  const headers: Record<string, string> = {};
-  if (contentType) {
-    headers['Content-Type'] = contentType;
-  }
-  const customUrl = localStorage.getItem('stackreader_apps_script_url');
-  if (customUrl) {
-    headers['x-apps-script-url'] = customUrl;
-  }
-  return headers;
+const getCustomUrl = (): string | null => {
+  const url = localStorage.getItem('stackreader_apps_script_url');
+  return url && url !== 'disabled' && url.startsWith('https://') ? url : null;
 };
 
 const isSyncEnabled = (): boolean => {
-  const customUrl = localStorage.getItem('stackreader_apps_script_url');
-  if (customUrl === 'disabled') return false;
-  // If no custom URL, we cannot sync as the backend is not configured.
-  return typeof customUrl === 'string' && customUrl.trim().startsWith('https://');
+  if (getCustomUrl()) return true;
+  return localStorage.getItem('stackreader_backend_sync_enabled') === 'true';
+};
+
+const fetchSheet = async (method: string, body?: unknown): Promise<Response> => {
+  const customUrl = getCustomUrl();
+  const headers: Record<string, string> = {};
+  if (customUrl) headers['x-apps-script-url'] = customUrl;
+  if (body) headers['Content-Type'] = 'application/json';
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+
+  try {
+    const res = await fetch(SHEET_PROXY, {
+      method,
+      headers,
+      body: body ? JSON.stringify(body) : undefined,
+      signal: controller.signal,
+    });
+    return res;
+  } finally {
+    clearTimeout(timeout);
+  }
+};
+
+const loadLocal = (): LibraryFeed[] => {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (item): item is LibraryFeed =>
+        item && typeof item === 'object' && typeof item.originalUrl === 'string'
+    );
+  } catch {
+    return [];
+  }
+};
+
+const saveLocal = (items: LibraryFeed[]): void => {
+  const seen = new Set<string>();
+  const deduped: LibraryFeed[] = [];
+  for (const item of items) {
+    const key = item.originalUrl.trim().toLowerCase();
+    if (!key || key === 'originalurl' || key === 'url' || key === 'feedurl') continue;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(item);
+  }
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(deduped));
+};
+
+const normalize = (items: LibraryFeed[]): LibraryFeed[] =>
+  items.map(f => ({
+    title: f.title || 'Untitled Publication',
+    originalUrl: f.originalUrl,
+    image: f.image || '',
+    description: f.description || '',
+    sourceType: 'SUBSTACK' as const,
+  }));
+
+const mergeLocalAndSheet = (local: LibraryFeed[], sheet: LibraryFeed[]): LibraryFeed[] => {
+  const seen = new Set<string>();
+  const merged: LibraryFeed[] = [];
+
+  const add = (item: LibraryFeed) => {
+    const key = item.originalUrl.trim().toLowerCase();
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    merged.push(item);
+  };
+
+  for (const item of sheet) add(item);
+  for (const item of local) add(item);
+
+  return merged;
 };
 
 export const dbService = {
-  // Triggers remote initialization action in the background to set up column headers
   initializeSheet: async (): Promise<void> => {
     if (!isSyncEnabled()) return;
     try {
-      const response = await fetch(APPS_SCRIPT_URL, {
-        method: 'POST',
-        headers: getHeaders('application/json'),
-        body: JSON.stringify({ action: 'setup' })
-      });
-      if (!response.ok) {
-        console.error("Failed to initialize sheet headers:", response.statusText);
-      }
-    } catch (err) {
-      console.error("Error sending setup action:", err);
+      await fetchSheet('POST', { action: 'setup' });
+    } catch {
+      // silent - sheet not configured
     }
   },
 
-  // Triggers remote deduplication action in the background
   deduplicateSheet: async (): Promise<void> => {
     if (!isSyncEnabled()) return;
     try {
-      const response = await fetch(APPS_SCRIPT_URL, {
-        method: 'POST',
-        headers: getHeaders('application/json'),
-        body: JSON.stringify({ action: 'deduplicate' })
-      });
-      if (!response.ok) {
-        console.error("Failed to deduplicate sheet:", response.statusText);
-      }
-    } catch (err) {
-      console.error("Error sending background deduplicate action:", err);
+      await fetchSheet('POST', { action: 'deduplicate' });
+    } catch {
+      // silent
     }
   },
 
   getLibrary: async (): Promise<LibraryFeed[]> => {
+    const local = loadLocal();
+
     if (!isSyncEnabled()) {
-      localStorage.removeItem("sheet_error_diagnostic");
-      // Fallback to local storage
+      localStorage.removeItem('sheet_error_diagnostic');
+      return local;
+    }
+
+    try {
+      const res = await fetchSheet('GET');
+
+      if (!res.ok) {
+        console.warn(`[Sync] Sheet GET returned ${res.status}`);
+        localStorage.setItem('sheet_error_diagnostic', 'true');
+        return local;
+      }
+
+      const text = await res.text();
+
+      if (text.includes('TypeError') || text.includes('setHeaders') || text.includes('is not a function')) {
+        console.warn('[Sync] Apps Script TypeError detected');
+        localStorage.setItem('sheet_error_diagnostic', 'true');
+        return local;
+      }
+      localStorage.removeItem('sheet_error_diagnostic');
+
+      let sheetData: LibraryFeed[] = [];
       try {
-        const stored = localStorage.getItem(STORAGE_KEY);
-        if (stored) {
-          const parsed = JSON.parse(stored);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            const seen = new Set<string>();
-            const uniqueData: LibraryFeed[] = [];
-            for (const item of parsed) {
-              if (item && item.originalUrl) {
-                const urlKey = item.originalUrl.trim().toLowerCase();
-                if (urlKey === "originalurl" || urlKey === "url") {
-                  continue;
-                }
-                if (!seen.has(urlKey)) {
-                  seen.add(urlKey);
-                  uniqueData.push(item);
-                }
-              }
-            }
-            return uniqueData;
-          }
-        }
-      } catch (e) {
-        console.error("Error loading local library", e);
-      }
-      return INITIAL_PLACEHOLDERS;
-    }
-
-    try {
-      // Fetch from Google Sheets Apps Script with a timeout
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15000);
-
-      const response = await fetch(APPS_SCRIPT_URL, {
-        signal: controller.signal,
-        headers: getHeaders()
-      });
-      clearTimeout(timeoutId);
-
-      if (response.ok) {
-        const text = await response.text();
-
-        // Diagnostic check for Google Apps Script TypeError
-        if (text.includes("TypeError") || text.includes("setHeaders") || text.includes("is not a function")) {
-          console.warn("Handled Apps Script response mismatch - error page detected. Diagnostic flag set.");
-          localStorage.setItem("sheet_error_diagnostic", "true");
-        } else {
-          localStorage.removeItem("sheet_error_diagnostic");
-        }
-
-        try {
-          const result = JSON.parse(text);
-          if (result.status === "success" && Array.isArray(result.data)) {
-            // If the spreadsheet is empty, we return placeholders but don't force write them
-            if (result.data.length === 0) {
-              return INITIAL_PLACEHOLDERS;
-            }
-
-            // Deduplicate and filter out any header row values that might be treated as a data record
-            const seen = new Set<string>();
-            const uniqueData: LibraryFeed[] = [];
-            for (const item of result.data) {
-              if (item) {
-                let title = "";
-                let originalUrl = "";
-                let image = "";
-                let description = "";
-
+        const result = JSON.parse(text);
+        if (result.status === 'success' && Array.isArray(result.data)) {
+          sheetData = result.data
+            .map((item: any): LibraryFeed | null => {
+              try {
+                if (!item) return null;
                 if (Array.isArray(item)) {
-                  // Resilient array row parser - searches elements to find fields dynamically
-                  const urls = item.map(v => String(v || '').trim()).filter(v => v.startsWith('http://') || v.startsWith('https://'));
-                  
-                  // Image URL is usually a URL with an image extension or keywords
-                  const imageUrls = urls.filter(v => 
-                    v.toLowerCase().match(/\.(jpeg|jpg|gif|png|svg|webp)/i) || 
-                    v.toLowerCase().includes('logo') || 
-                    v.toLowerCase().includes('avatar') || 
-                    v.toLowerCase().includes('image')
-                  );
-                  
-                  const nonImageUrls = urls.filter(v => !imageUrls.includes(v));
-
-                  if (nonImageUrls.length > 0) {
-                    originalUrl = nonImageUrls[0];
-                  } else if (urls.length > 0) {
-                    originalUrl = urls[0];
-                  }
-
-                  if (imageUrls.length > 0) {
-                    image = imageUrls[0];
-                  }
-
-                  const nonUrlStrings = item.map(v => String(v || '').trim()).filter(v => v && !v.startsWith('http'));
-                  if (nonUrlStrings.length > 0) {
-                    title = nonUrlStrings[0];
-                    if (nonUrlStrings.length > 1) {
-                      description = nonUrlStrings[1];
-                    }
-                  }
-
-                  // Standard fallbacks if column parsing didn't find them:
-                  if (!title && item[0]) title = String(item[0]).trim();
-                  if (!description && item[1]) description = String(item[1]).trim();
-                  if (!originalUrl) {
-                    originalUrl = String(item[3] || item[2] || item[0] || "").trim();
-                  }
-                  if (!image && item[4]) image = String(item[4]).trim();
-                } else if (typeof item === 'object') {
-                  // Flexible object key mapping supporting camelCase, lowercase, TitleCase, etc.
-                  title = String(item.title || item.Title || item.name || item.Name || "").trim();
-                  description = String(item.description || item.Description || "").trim();
-                  originalUrl = String(
-                    item.originalUrl || 
-                    item.originalurl || 
-                    item.url || 
-                    item.Url || 
-                    item.URL ||
-                    item.feedUrl || 
-                    item.feedurl || 
-                    item.FeedUrl || 
-                    item.OriginalUrl || 
-                    ""
-                  ).trim();
-                  image = String(
-                    item.image || 
-                    item.logoUrl || 
-                    item.logourl || 
-                    item.logo || 
-                    item.LogoUrl || 
-                    item.Logo || 
-                    ""
-                  ).trim();
-
-                  // Robust fallback - search all object properties for any URL
-                  if (!originalUrl) {
-                    for (const key of Object.keys(item)) {
-                      const val = String((item as any)[key] || '').trim();
-                      if (val.startsWith('http://') || val.startsWith('https://')) {
-                        if (!val.toLowerCase().match(/\.(jpeg|jpg|gif|png|svg|webp)/i) && !key.toLowerCase().includes('logo')) {
-                          originalUrl = val;
-                          break;
-                        }
-                      }
-                    }
-                  }
+                  const vals = item.map((v: any) => String(v || '').trim());
+                  const urls = vals.filter(v => v.startsWith('http'));
+                  const nonUrls = vals.filter(v => v && !v.startsWith('http'));
+                  const sub = (s: string) => /\.(jpeg|jpg|gif|png|svg|webp)/i.test(s) || /logo|avatar|image/i.test(s);
+                  const imageUrl = urls.find(u => sub(u)) || '';
+                  const feedUrl = urls.find(u => !sub(u)) || urls[0] || '';
+                  return {
+                    title: nonUrls[0] || 'Untitled Publication',
+                    originalUrl: feedUrl,
+                    image: imageUrl,
+                    description: nonUrls[1] || '',
+                    sourceType: 'SUBSTACK',
+                  };
                 }
-
-                if (originalUrl) {
-                  const urlKey = originalUrl.toLowerCase();
-                  const titleKey = title.toLowerCase();
-
-                  // Filter out headers/placeholders
-                  if (
-                    urlKey === "originalurl" || 
-                    urlKey === "url" || 
-                    urlKey === "feedurl" || 
-                    titleKey === "title" || 
-                    titleKey === "title name" ||
-                    urlKey.startsWith("http://originalurl") ||
-                    urlKey.startsWith("https://originalurl")
-                  ) {
-                    continue;
-                  }
-
-                  if (!seen.has(urlKey)) {
-                    seen.add(urlKey);
-                    uniqueData.push({
-                      title: title || "Untitled Publication",
-                      originalUrl: originalUrl,
-                      image: image || "",
-                      description: description || "Substack publication feed.",
-                      sourceType: 'SUBSTACK'
-                    });
-                  }
+                if (typeof item === 'object') {
+                  const getVal = (...keys: string[]) => {
+                    for (const k of keys) {
+                      const v = (item as any)[k];
+                      if (v != null && v !== '') return String(v).trim();
+                    }
+                    return '';
+                  };
+                  const url = getVal('originalUrl', 'originalurl', 'url', 'Url', 'URL', 'feedUrl', 'feedurl', 'FeedUrl', 'OriginalUrl');
+                  const img = getVal('image', 'logoUrl', 'logourl', 'logo', 'LogoUrl', 'Logo');
+                  const fallbackUrl: string = !url
+                    ? (Object.values(item as any).find((v: any) => typeof v === 'string' && v.startsWith('http') && !/\.(jpg|jpeg|png|gif|svg|webp)/i.test(v)) as string) || ''
+                    : url;
+                  return {
+                    title: getVal('title', 'Title', 'name', 'Name') || 'Untitled Publication',
+                    originalUrl: fallbackUrl,
+                    image: img,
+                    description: getVal('description', 'Description') || '',
+                    sourceType: 'SUBSTACK',
+                  };
                 }
+                return null;
+              } catch {
+                return null;
               }
-            }
-
-            // Trigger remote deduplication in the background
-            dbService.deduplicateSheet().catch(() => {});
-
-            // Update local storage cache
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(uniqueData));
-            return uniqueData;
-          }
-        } catch (parseError) {
-          console.warn("Could not parse Apps Script response as JSON:", text);
+            })
+            .filter((f: LibraryFeed | null): f is LibraryFeed => f != null && !!f.originalUrl);
         }
+      } catch {
+        console.warn('[Sync] Could not parse sheet response as JSON');
       }
-    } catch (e) {
-      console.warn("Could not fetch library from Google Sheet, falling back to local storage:", e);
-    }
 
-    // Fallback to local storage
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          // Deduplicate local storage fallback as well
-          const seen = new Set<string>();
-          const uniqueData: LibraryFeed[] = [];
-          for (const item of parsed) {
-            if (item && item.originalUrl) {
-              const urlKey = item.originalUrl.trim().toLowerCase();
-              if (urlKey === "originalurl" || urlKey === "url") {
-                continue;
-              }
-              if (!seen.has(urlKey)) {
-                seen.add(urlKey);
-                uniqueData.push(item);
-              }
-            }
-          }
-          return uniqueData;
-        }
-      }
-    } catch (e) {
-      console.error("Error loading local library", e);
-    }
+      if (sheetData.length === 0) return local;
 
-    return INITIAL_PLACEHOLDERS;
+      const merged = mergeLocalAndSheet(normalize(local), sheetData);
+      const deduped = [...new Map(merged.map(f => [f.originalUrl.trim().toLowerCase(), f])).values()];
+      saveLocal(deduped);
+      return deduped;
+    } catch (err) {
+      console.warn('[Sync] Sheet fetch failed, using local:', err);
+      return local;
+    }
   },
 
   addToLibrary: async (feed: LibraryFeed): Promise<LibraryFeed[]> => {
-    // 1. Update local storage immediately for instant UI responsiveness
-    let library: LibraryFeed[] = [];
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      library = stored ? JSON.parse(stored) : [...INITIAL_PLACEHOLDERS];
-      
-      // Filter out matching URL
-      library = library.filter(f => f && f.originalUrl && f.originalUrl.trim().toLowerCase() !== feed.originalUrl.trim().toLowerCase());
-      library.unshift(feed);
+    const local = loadLocal();
+    const cleanUrl = feed.originalUrl.trim().toLowerCase();
+    const filtered = local.filter(f => f.originalUrl.trim().toLowerCase() !== cleanUrl);
+    const updated = [feed, ...filtered];
+    saveLocal(updated);
 
-      // Deduplicate
-      const seen = new Set<string>();
-      const uniqueData: LibraryFeed[] = [];
-      for (const item of library) {
-        if (item && item.originalUrl) {
-          const urlKey = item.originalUrl.trim().toLowerCase();
-          if (urlKey === "originalurl" || urlKey === "url") {
-            continue;
-          }
-          if (!seen.has(urlKey)) {
-            seen.add(urlKey);
-            uniqueData.push(item);
-          }
-        }
-      }
-      library = uniqueData;
+    // Always attempt sync - proxy returns 500 if not configured (fast)
+    fetchSheet('POST', { action: 'add', feed }).then(r => {
+      if (!r.ok && r.status !== 500) console.warn('[Sync] Add failed:', r.status);
+    }).catch(() => {});
 
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(library));
-    } catch (e) {
-      console.error("Error adding to local library", e);
-    }
-
-    // 2. Async sync with Google Sheet in the background (no-preflight simple request)
-    if (isSyncEnabled()) {
-      fetch(APPS_SCRIPT_URL, {
-        method: 'POST',
-        headers: getHeaders('application/json'),
-        body: JSON.stringify({
-          action: 'add',
-          feed: feed
-        })
-      }).catch(err => console.error("Error syncing feed addition to Google Sheets:", err));
-
-      // Trigger remote deduplication and auto-setup in the background
-      dbService.deduplicateSheet().catch(() => {});
-    }
-
-    return library;
+    return updated;
   },
 
   removeFromLibrary: async (url: string): Promise<LibraryFeed[]> => {
-    // 1. Update local storage immediately for instant UI responsiveness
-    let library: LibraryFeed[] = [];
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) {
-        library = JSON.parse(stored);
-      } else {
-        library = [...INITIAL_PLACEHOLDERS];
-      }
-      const cleanUrl = url.trim().toLowerCase();
-      library = library.filter(f => f && f.originalUrl && f.originalUrl.trim().toLowerCase() !== cleanUrl);
+    const cleanUrl = url.trim().toLowerCase();
+    const local = loadLocal();
+    const updated = local.filter(f => f.originalUrl.trim().toLowerCase() !== cleanUrl);
+    saveLocal(updated);
 
-      // Deduplicate
-      const seen = new Set<string>();
-      const uniqueData: LibraryFeed[] = [];
-      for (const item of library) {
-        if (item && item.originalUrl) {
-          const urlKey = item.originalUrl.trim().toLowerCase();
-          if (urlKey === "originalurl" || urlKey === "url") {
-            continue;
-          }
-          if (!seen.has(urlKey)) {
-            seen.add(urlKey);
-            uniqueData.push(item);
-          }
-        }
-      }
-      library = uniqueData;
+    fetchSheet('POST', { action: 'remove', originalUrl: url, url, feedUrl: url }).then(r => {
+      if (!r.ok && r.status !== 500) console.warn('[Sync] Remove failed:', r.status);
+    }).catch(() => {});
 
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(library));
-    } catch (e) {
-      console.error("Error removing from local library", e);
-    }
-
-    // 2. Async sync with Google Sheet in the background (no-preflight simple request)
-    // Send a single highly robust payload with all common URL parameter formats
-    if (isSyncEnabled()) {
-      fetch(APPS_SCRIPT_URL, {
-        method: 'POST',
-        headers: getHeaders('application/json'),
-        body: JSON.stringify({
-          action: 'remove',
-          url: url,
-          originalUrl: url,
-          feedUrl: url,
-          feed: {
-            url: url,
-            originalUrl: url,
-            feedUrl: url
-          }
-        })
-      }).catch(err => console.error("Error syncing feed removal:", err));
-
-      // Trigger remote deduplication and auto-setup in the background
-      dbService.deduplicateSheet().catch(() => {});
-    }
-
-    return library;
-  }
+    return updated;
+  },
 };
+
+

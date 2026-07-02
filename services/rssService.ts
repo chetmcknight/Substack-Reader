@@ -213,7 +213,7 @@ const fetchWithRSS2JSON = async (originalUrl: string): Promise<FeedData> => {
             link: item.link,
             pubDate: item.pubDate,
             contentSnippet: item.description 
-                ? item.description.replace(/<[^>]*>/g, '').substring(0, 240) + (item.description.length > 240 ? '...' : '')
+                ? String(item.description).replace(/<[^>]*>/g, '').substring(0, 240) + (String(item.description).length > 240 ? '...' : '')
                 : '',
             content: item.content || item.description, // RSS2JSON maps content:encoded to content
             guid: item.guid || item.link

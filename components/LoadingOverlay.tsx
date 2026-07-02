@@ -71,13 +71,7 @@ export const LoadingOverlay: React.FC = () => {
         </div>
       </div>
 
-      <style>{`
-        @keyframes loading-bar {
-          0% { transform: translateX(-100%); width: 20%; }
-          50% { width: 40%; }
-          100% { transform: translateX(300%); width: 20%; }
-        }
-      `}</style>
+
     </div>
   );
 };

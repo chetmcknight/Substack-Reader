@@ -31,18 +31,39 @@ export const FeedHeader: React.FC<FeedHeaderProps> = ({ data, isSaved, onToggleS
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(data.originalUrl);
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(data.originalUrl).catch(() => {
+        fallbackCopy(data.originalUrl);
+      });
+    } else {
+      fallbackCopy(data.originalUrl);
+    }
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const fallbackCopy = (text: string) => {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+  };
+
+  const [analysisError, setAnalysisError] = useState(false);
+
   const handleAnalyze = async () => {
     setAnalyzing(true);
+    setAnalysisError(false);
     try {
       const result = await analyzeFeedWithGemini(data);
       setAnalysis(result);
     } catch (e) {
       console.error(e);
+      setAnalysisError(true);
     } finally {
       setAnalyzing(false);
     }
@@ -127,15 +148,20 @@ export const FeedHeader: React.FC<FeedHeaderProps> = ({ data, isSaved, onToggleS
 
           {/* Gemini Analysis Section */}
           <div className="mt-6 pt-6 border-t border-white/5">
-             {!analysis ? (
-               <button 
-                onClick={handleAnalyze}
-                disabled={analyzing}
-                className="flex items-center gap-2 text-[#2E6BFF] hover:text-[#4b7dff] transition-colors font-medium disabled:opacity-50 text-sm"
-               >
-                 <Sparkles size={16} className={analyzing ? "animate-pulse" : ""} />
-                 {analyzing ? "Analyzing feed vibe..." : "Generate AI Summary"}
-               </button>
+          {!analysis ? (
+                <div className="flex items-center gap-3 flex-wrap">
+                  <button 
+                   onClick={handleAnalyze}
+                   disabled={analyzing}
+                   className="flex items-center gap-2 text-[#2E6BFF] hover:text-[#4b7dff] transition-colors font-medium disabled:opacity-50 text-sm"
+                  >
+                    <Sparkles size={16} className={analyzing ? "animate-pulse" : ""} />
+                    {analyzing ? "Analyzing feed vibe..." : "Generate AI Summary"}
+                  </button>
+                  {analysisError && (
+                    <span className="text-xs text-red-400">Analysis failed. Check GEMINI_API_KEY.</span>
+                  )}
+                </div>
              ) : (
                <div className="bg-[#0B0D10]/50 rounded-xl p-5 border border-white/5 space-y-4 animate-in fade-in zoom-in-95">
                   <div className="flex items-center gap-2 text-[#2E6BFF]">

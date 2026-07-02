@@ -1,6 +1,4 @@
-
-// Force re-scan
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { SearchInput } from './components/SearchInput.tsx';
 import { FeedView } from './components/FeedView.tsx';
 import { LibraryList } from './components/LibraryList.tsx';
@@ -36,6 +34,9 @@ const App: React.FC = () => {
   const [isSyncingSheet, setIsSyncingSheet] = useState(false);
   const [showSyncModal, setShowSyncModal] = useState(false);
   const [hasSyncError, setHasSyncError] = useState(false);
+
+  const activeFeedsRef = useRef(activeFeeds);
+  activeFeedsRef.current = activeFeeds;
   
   // Enforce Dark Mode
   useEffect(() => {
@@ -54,51 +55,43 @@ const App: React.FC = () => {
 
   // Load library on mount and perform automated Sync & Clean-up
   useEffect(() => {
-    const autoSyncAndClean = async () => {
-      try {
-        setIsSyncingSheet(true);
-        // 1. Fetch latest fully synchronized and deduplicated library FIRST to render UI instantly
-        const freshLibrary = await dbService.getLibrary();
-        setLibrary(freshLibrary);
+    let mounted = true;
 
-        // 2. Run initialization and deduplication sequentially in the background without blocking the mount
-        const runBackgroundSetup = async () => {
-          try {
-            await dbService.initializeSheet();
-            await dbService.deduplicateSheet();
-          } catch (e) {
-            console.error("Background sheet initialization/deduplication failed:", e);
-          }
-        };
-        runBackgroundSetup();
-      } catch (e) {
-        console.error("Auto Sync & Clean-up failed on mount:", e);
-      } finally {
-        setIsSyncingSheet(false);
-      }
+    const init = async () => {
+      try {
+        const res = await fetch('/api/sync-status');
+        if (res.ok) {
+          const status = await res.json();
+          localStorage.setItem('stackreader_backend_sync_enabled', String(status.enabled));
+        }
+      } catch {}
+
+      setIsSyncingSheet(true);
+      const freshLibrary = await dbService.getLibrary();
+      if (mounted) setLibrary(freshLibrary);
+
+      dbService.initializeSheet().catch(() => {});
+      dbService.deduplicateSheet().catch(() => {});
+      if (mounted) setIsSyncingSheet(false);
     };
 
-    autoSyncAndClean();
+    init();
 
-    // Set up a background periodic Sync & Clean-up every 45 seconds to keep sheet perfectly synchronized and clean
     const intervalId = setInterval(async () => {
-      try {
-        console.log("Running periodic background Sync & Clean-up...");
-        await dbService.deduplicateSheet();
-        const freshLibrary = await dbService.getLibrary();
-        setLibrary(freshLibrary);
-      } catch (e) {
-        console.error("Background periodic Sync & Clean-up failed:", e);
-      }
+      await dbService.deduplicateSheet();
+      const freshLibrary = await dbService.getLibrary();
+      if (mounted) setLibrary(freshLibrary);
     }, 45000);
 
-    return () => clearInterval(intervalId);
+    return () => {
+      mounted = false;
+      clearInterval(intervalId);
+    };
   }, []);
 
   const addFeedToView = useCallback(async (url: string, forceRefresh = false) => {
-    const existing = activeFeeds.find(f => f.originalUrl === url);
+    const existing = activeFeedsRef.current.find(f => f.originalUrl === url);
     if (existing && !forceRefresh) {
-       // Smooth scroll to top where the active feeds are displayed
        window.scrollTo({ top: 0, behavior: 'smooth' });
        return;
     }
@@ -135,18 +128,14 @@ const App: React.FC = () => {
 
       setLoadingState(LoadingState.SUCCESS);
       setSearchQuery('');
-      
-      // Smooth scroll to top to see the newly loaded feed
-      setTimeout(() => {
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-      }, 100);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err) {
       console.error("Feed Load Failed:", err);
       const message = err instanceof Error ? err.message : "An unexpected error occurred.";
       setErrorMsg(message);
       setLoadingState(LoadingState.ERROR);
     }
-  }, [activeFeeds]);
+  }, []);
 
   const handleSearch = useCallback((input: string) => {
     if (!input.trim()) return;
@@ -240,10 +229,12 @@ const App: React.FC = () => {
 
   const closeFeed = useCallback((url: string) => {
     setActiveFeeds(prev => prev.filter(f => f.originalUrl !== url));
+    setLoadingState(LoadingState.IDLE);
+    setErrorMsg(null);
   }, []);
 
   return (
-    <div className="relative min-h-screen selection:bg-[#ff3152]/30 bg-[#050505] overflow-hidden pb-20 px-4 pt-12 md:pt-24 font-sans text-textPrimary">
+    <div className="relative min-h-screen min-h-[-webkit-fill-available] selection:bg-[#ff3152]/30 bg-[#050505] overflow-hidden pb-20 safe-bottom px-4 pt-12 safe-top md:pt-24 font-sans text-textPrimary">
       
       {/* Immersive Background Effects */}
       <div className="fixed inset-0 z-0 pointer-events-none">

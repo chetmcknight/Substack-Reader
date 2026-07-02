@@ -21,8 +21,13 @@
     <meta property="og:image" content="https://images.unsplash.com/photo-1504711434969-e33886168f5c?q=80&w=1200&auto=format&fit=crop">
 
     <title>StackReader Pro | Professional Feed Engine</title>
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="/manifest.json">
     <!-- Favicon -->
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='5' fill='%23FF3B5C'/%3E%3Cpath d='M7 6h10v2H7zM7 10h10v2H7zM7 14h10l-5 4.5-5-4.5v-4z' fill='white'/%3E%3C/svg%3E">
+    <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='5' fill='%23FF3B5C'/%3E%3Cpath d='M7 6h10v2H7zM7 10h10v2H7zM7 14h10l-5 4.5-5-4.5v-4z' fill='white'/%3E%3C/svg%3E">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
       tailwind.config = {
@@ -61,7 +66,25 @@
         background-color: #050505;
         color: #ffffff;
         min-height: 100vh;
+        min-height: -webkit-fill-available;
         overflow-x: hidden;
+        -webkit-overflow-scrolling: touch;
+        overscroll-behavior: none;
+      }
+      html {
+        height: -webkit-fill-available;
+      }
+      /* Safe area padding for notched devices */
+      .safe-bottom {
+        padding-bottom: env(safe-area-inset-bottom, 0px);
+      }
+      .safe-top {
+        padding-top: env(safe-area-inset-top, 0px);
+      }
+      /* Prevent pull-to-refresh on modals */
+      .modal-scroll {
+        overscroll-behavior: contain;
+        -webkit-overflow-scrolling: touch;
       }
       /* Custom Scrollbar */
       ::-webkit-scrollbar {
@@ -109,6 +132,12 @@
         border-radius: 0 1rem 1rem 0;
         margin: 2rem 0;
       }
+
+      @keyframes loading-bar {
+        0% { transform: translateX(-100%); width: 20%; }
+        50% { width: 40%; }
+        100% { transform: translateX(300%); width: 20%; }
+      }
     </style>
 </head>
   <body class="antialiased">
@@ -122,5 +151,10 @@
         </div>
     </div>
     <script type="module" src="/index.tsx"></script>
+    <script>
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/sw.js').catch(() => {});
+      }
+    </script>
 </body>
 </html>

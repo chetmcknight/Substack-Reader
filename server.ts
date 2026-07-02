@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express from 'express';
 import path from 'path';
 import { GoogleGenAI, Type } from "@google/genai";
@@ -111,6 +112,11 @@ async function startServer() {
       console.error('Proxy Error:', error);
       res.status(502).send('Failed to fetch resource via proxy: ' + error.message);
     }
+  });
+
+  // --- GOOGLE SHEETS SYNC STATUS ---
+  app.get('/api/sync-status', (req, res) => {
+    res.json({ enabled: typeof process.env.APPS_SCRIPT_URL === 'string' && process.env.APPS_SCRIPT_URL.trim().startsWith('https://') });
   });
 
   // --- GOOGLE SHEETS PROXY ---
@@ -235,7 +241,7 @@ async function startServer() {
   });
 
   // Determine if we are in production
-  const isProduction = process.env.NODE_ENV === "production" || !process.argv[1]?.endsWith('server.ts');
+  const isProduction = process.env.NODE_ENV === "production" || process.argv[1]?.endsWith('server.cjs');
 
   // Vite middleware for development
   if (!isProduction) {
@@ -248,7 +254,7 @@ async function startServer() {
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
-    app.get('*all', (req, res) => {
+    app.get('/{*splat}', (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }

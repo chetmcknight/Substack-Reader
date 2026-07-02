@@ -54,29 +54,31 @@ export const ArticleModal: React.FC<ArticleModalProps> = ({ item, onClose }) => 
         onClick={onClose}
       />
       
-      {/* Modal Content */}
-      <GlassCard className="w-full h-full md:h-[90vh] md:max-w-4xl relative z-10 flex flex-col p-0 overflow-hidden bg-surface border-white/10 shadow-2xl animate-in zoom-in-95 duration-300 md:rounded-2xl">
+       {/* Modal Content */}
+      <GlassCard className="w-full h-full md:h-[90vh] md:max-w-4xl relative z-10 flex flex-col p-0 overflow-hidden bg-surface border-white/10 shadow-2xl animate-in zoom-in-95 duration-300 md:rounded-2xl safe-bottom">
         
         {/* Header */}
-        <div className="flex-shrink-0 flex items-center justify-between p-4 border-b border-white/5 bg-surfaceHighlight">
-           <div className="flex items-center gap-2 text-textMuted text-sm">
-             <Calendar size={14} />
-             <span>{new Date(item.pubDate).toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</span>
+        <div className="flex-shrink-0 flex items-center justify-between p-4 safe-top border-b border-white/5 bg-surfaceHighlight">
+           <div className="flex items-center gap-2 text-textMuted text-sm min-w-0">
+             <Calendar size={14} className="shrink-0" />
+             <span className="truncate">{new Date(item.pubDate).toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</span>
            </div>
            
-           <div className="flex items-center gap-2">
+           <div className="flex items-center gap-2 shrink-0">
              <a 
                href={item.link}
                target="_blank"
                rel="noreferrer"
                className="p-2 text-textMuted hover:text-brand-end transition-colors rounded-lg hover:bg-white/5"
                title="Open in Browser"
+               aria-label="Open in browser"
              >
                <ExternalLink size={20} />
              </a>
              <button 
                onClick={onClose}
                className="p-2 text-textMuted hover:text-white transition-colors rounded-lg hover:bg-white/5"
+               aria-label="Close article"
              >
                <X size={24} />
              </button>
@@ -84,7 +86,7 @@ export const ArticleModal: React.FC<ArticleModalProps> = ({ item, onClose }) => 
         </div>
 
         {/* Scrollable Body */}
-        <div className="flex-1 overflow-y-auto overflow-x-hidden p-6 md:p-10 scrollbar-thin">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden p-6 md:p-10 modal-scroll">
            <h1 className="text-3xl md:text-4xl font-bold text-white mb-6 leading-tight">
              {item.title}
            </h1>

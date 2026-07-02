@@ -2,7 +2,7 @@
 import React, { memo } from 'react';
 import { LibraryFeed } from '../types.ts';
 import { GlassCard } from './GlassCard.tsx';
-import { Trash2, ArrowRight, Rss, RotateCw, RefreshCw } from 'lucide-react';
+import { Trash2, ArrowRight, Rss, RotateCw } from 'lucide-react';
 
 interface LibraryListProps {
   feeds: LibraryFeed[];

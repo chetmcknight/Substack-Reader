@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
-import { Settings, Copy, Check, Info, ArrowRight, RotateCw, Trash2, HelpCircle } from 'lucide-react';
+import { Settings, Copy, Check, Info } from 'lucide-react';
 
 interface SyncSettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (url: string) => void;
+  onSave: () => void;
 }
 
 export const SyncSettingsModal: React.FC<SyncSettingsModalProps> = ({ isOpen, onClose, onSave }) => {
@@ -14,176 +14,290 @@ export const SyncSettingsModal: React.FC<SyncSettingsModalProps> = ({ isOpen, on
   const [copied, setCopied] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
 
-  const APPS_SCRIPT_CODE = `function doGet(e) {
-  return handleRequest(e);
+  const APPS_SCRIPT_CODE = `var LOCK_TIMEOUT_MS = 10000;
+var HEADERS = ["title", "originalUrl", "description", "image", "sourceType", "updatedAt"];
+
+function withLock_(callback) {
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(LOCK_TIMEOUT_MS);
+    var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+    return callback(sheet);
+  } catch (e) {
+    throw new Error("Could not acquire lock: " + e.toString());
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function doGet(e) {
+  try {
+    var resultData = withLock_(getFeeds);
+    return ContentService.createTextOutput(JSON.stringify({
+      status: 'success',
+      data: resultData
+    })).setMimeType(ContentService.MimeType.JSON);
+  } catch (error) {
+    return ContentService.createTextOutput(JSON.stringify({
+      status: 'error',
+      message: error.toString()
+    })).setMimeType(ContentService.MimeType.JSON);
+  }
 }
 
 function doPost(e) {
-  return handleRequest(e);
-}
-
-function handleRequest(e) {
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-  var result = { status: "success", data: [] };
-  
-  ensureHeaders(sheet);
-  
   try {
-    var params = {};
-    if (e && e.postData && e.postData.contents) {
-      params = JSON.parse(e.postData.contents);
-    } else if (e && e.parameter) {
-      params = e.parameter;
-    }
+    var postData;
     
-    var action = params.action || "";
-    
-    if (action === "setup") {
-      ensureHeaders(sheet);
-      result.message = "Sheet headers verified on Row 1.";
-    } else if (action === "add") {
-      var feed = params.feed;
-      if (feed && feed.originalUrl) {
-        addFeed(sheet, feed);
-        result.message = "Feed added successfully.";
-      } else {
-        result.status = "error";
-        result.message = "No feed or originalUrl provided.";
+    if (e.postData && e.postData.contents) {
+      try {
+        postData = JSON.parse(e.postData.contents);
+      } catch (parseErr) {
+        return ContentService.createTextOutput(JSON.stringify({
+          status: 'error',
+          message: 'Invalid JSON payload'
+        })).setMimeType(ContentService.MimeType.JSON);
       }
-    } else if (action === "remove") {
-      var urlToRemove = params.url || params.originalUrl || (params.feed && params.feed.originalUrl);
-      if (urlToRemove) {
-        removeFeed(sheet, urlToRemove);
-        result.message = "Feed removed successfully.";
-      } else {
-        result.status = "error";
-        result.message = "No URL provided for removal.";
-      }
-    } else if (action === "deduplicate") {
-      deduplicate(sheet);
-      result.message = "Deduplication completed while preserving Row 1.";
     } else {
-      result.data = getFeeds(sheet);
+      return ContentService.createTextOutput(JSON.stringify({
+        status: 'error',
+        message: 'No POST data'
+      })).setMimeType(ContentService.MimeType.JSON);
     }
-  } catch (err) {
-    result.status = "error";
-    result.message = err.toString();
+    
+    var action = postData.action;
+    
+    withLock_(function(sheet) {
+      if (action === 'setup') {
+        ensureHeaders(sheet);
+        return;
+      }
+      
+      if (action === 'add') {
+        var feed = postData.feed || {};
+        addFeed(sheet, feed);
+        return;
+      }
+      
+      if (action === 'remove') {
+        var urlToRemove = postData.originalUrl || postData.url || postData.feedUrl || '';
+        if (postData.feed && !urlToRemove) {
+          urlToRemove = postData.feed.originalUrl || postData.feed.url || postData.feed.feedUrl || '';
+        }
+        if (!urlToRemove) {
+          throw new Error('No URL provided');
+        }
+        removeFeed(sheet, urlToRemove);
+        return;
+      }
+      
+      if (action === 'deduplicate') {
+        deduplicate(sheet);
+        return;
+      }
+      
+      throw new Error('Unknown action');
+    });
+    
+    return ContentService.createTextOutput(JSON.stringify({status: 'success'})).setMimeType(ContentService.MimeType.JSON);
+    
+  } catch (error) {
+    return ContentService.createTextOutput(JSON.stringify({
+      status: 'error',
+      message: error.toString(),
+      stack: error.stack
+    })).setMimeType(ContentService.MimeType.JSON);
   }
-  
-  return ContentService.createTextOutput(JSON.stringify(result))
-    .setMimeType(ContentService.MimeType.JSON);
 }
 
 function ensureHeaders(sheet) {
   var lastRow = sheet.getLastRow();
-  var headers = ["Title", "Description", "FeedUrl", "OriginalUrl", "LogoUrl", "LastUpdated"];
+  var lastColumn = sheet.getLastColumn();
   
-  if (lastRow === 0) {
-    sheet.appendRow(headers);
+  if (lastRow === 0 || lastColumn === 0) {
+    sheet.appendRow(HEADERS);
+    sheet.getRange(1, 1, 1, HEADERS.length).setFontWeight("bold");
     sheet.setFrozenRows(1);
-  } else {
-    var firstRowRange = sheet.getRange(1, 1, 1, 6);
-    var firstRowValues = firstRowRange.getValues()[0];
-    if (firstRowValues[0] !== "Title" || firstRowValues[2] !== "FeedUrl") {
-      sheet.insertRowBefore(1);
-      sheet.getRange(1, 1, 1, 6).setValues([headers]);
-      sheet.setFrozenRows(1);
+    return;
+  }
+  
+  var firstRowRange = sheet.getRange(1, 1, 1, lastColumn);
+  var firstRow = firstRowRange.getValues()[0].map(function(v) { return String(v).trim().toLowerCase(); });
+  
+  var hasHeaders = firstRow.indexOf("originalurl") !== -1 || 
+                   firstRow.indexOf("url") !== -1 || 
+                   firstRow.indexOf("feedurl") !== -1 || 
+                   firstRow.indexOf("title") !== -1;
+                   
+  if (!hasHeaders) {
+    var dataRow = sheet.getRange(1, 1, 1, lastColumn).getValues()[0];
+    var headers = [];
+    var urlIndex = -1;
+    var descIndex = -1;
+    var titleIndex = -1;
+    
+    for (var j = 0; j < dataRow.length; j++) {
+      var val = String(dataRow[j]).trim();
+      if (val.indexOf("http://") === 0 || val.indexOf("https://") === 0) {
+        urlIndex = j;
+      } else if (val.length > 40) {
+        descIndex = j;
+      } else if (val.length > 0 && titleIndex === -1) {
+        titleIndex = j;
+      }
     }
+    
+    for (var j = 0; j < Math.max(dataRow.length, HEADERS.length); j++) {
+      if (j === urlIndex) {
+        headers.push("originalUrl");
+      } else if (j === descIndex) {
+        headers.push("description");
+      } else if (j === titleIndex) {
+        headers.push("title");
+      } else if (j < HEADERS.length && !headers.includes(HEADERS[j])) {
+        headers.push(HEADERS[j]);
+      } else {
+        headers.push("column_" + (j + 1));
+      }
+    }
+    
+    sheet.insertRowBefore(1);
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    sheet.getRange(1, 1, 1, headers.length).setFontWeight("bold");
+    sheet.setFrozenRows(1);
   }
 }
 
 function getFeeds(sheet) {
-  var lastRow = sheet.getLastRow();
-  if (lastRow < 2) return [];
+  ensureHeaders(sheet);
+  var data = sheet.getDataRange().getValues();
+  if (data.length <= 1) return [];
   
-  var values = sheet.getRange(2, 1, lastRow - 1, 6).getValues();
+  var headers = data[0].map(function(h) { return String(h).trim().toLowerCase(); });
+  var titleIdx = headers.indexOf("title");
+  var urlIdx = headers.indexOf("originalurl");
+  if (urlIdx === -1) urlIdx = headers.indexOf("url");
+  var descIdx = headers.indexOf("description");
+  var imgIdx = headers.indexOf("image");
+  if (imgIdx === -1) imgIdx = headers.indexOf("logourl");
+  var sourceIdx = headers.indexOf("sourcetype");
+  var updatedIdx = headers.indexOf("updatedat");
+  
   var feeds = [];
-  
-  for (var i = 0; i < values.length; i++) {
-    var row = values[i];
-    if (row[3]) {
-      feeds.push({
-        title: row[0] || "",
-        description: row[1] || "",
-        feedUrl: row[2] || "",
-        originalUrl: row[3] || "",
-        logoUrl: row[4] || "",
-        lastUpdated: row[5] || ""
-      });
-    }
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    var url = urlIdx !== -1 ? String(row[urlIdx]).trim() : "";
+    if (!url) continue;
+    
+    feeds.push({
+      title: titleIdx !== -1 ? String(row[titleIdx]).trim() : "Untitled Publication",
+      originalUrl: url,
+      description: descIdx !== -1 ? String(row[descIdx]).trim() : "",
+      image: imgIdx !== -1 ? String(row[imgIdx]).trim() : "",
+      sourceType: sourceIdx !== -1 ? String(row[sourceIdx]).trim() : "SUBSTACK",
+      updatedAt: updatedIdx !== -1 ? String(row[updatedIdx]).trim() : ""
+    });
   }
   return feeds;
 }
 
 function addFeed(sheet, feed) {
   ensureHeaders(sheet);
+  var data = sheet.getDataRange().getValues();
+  var headers = data[0].map(function(h) { return String(h).trim().toLowerCase(); });
+  var now = new Date().toISOString();
   
-  var lastRow = sheet.getLastRow();
-  var values = lastRow > 1 ? sheet.getRange(2, 4, lastRow - 1, 1).getValues() : [];
+  var titleIdx = headers.indexOf("title");
+  var urlIdx = headers.indexOf("originalurl");
+  if (urlIdx === -1) urlIdx = headers.indexOf("url");
+  var descIdx = headers.indexOf("description");
+  var imgIdx = headers.indexOf("image");
+  if (imgIdx === -1) imgIdx = headers.indexOf("logourl");
+  var sourceIdx = headers.indexOf("sourcetype");
+  var updatedIdx = headers.indexOf("updatedat");
+  
+  var targetUrl = (feed.originalUrl || feed.url || "").trim().toLowerCase();
   var exists = false;
-  var feedUrlLower = (feed.originalUrl || "").trim().toLowerCase();
   
-  for (var i = 0; i < values.length; i++) {
-    if (values[i][0] && values[i][0].toString().trim().toLowerCase() === feedUrlLower) {
-      exists = true;
-      var rowNum = i + 2; 
-      sheet.getRange(rowNum, 1, 1, 6).setValues([[
-        feed.title || "",
-        feed.description || "",
-        feed.feedUrl || "",
-        feed.originalUrl || "",
-        feed.logoUrl || "",
-        feed.lastUpdated || new Date().toISOString()
-      ]]);
-      break;
+  if (urlIdx !== -1) {
+    for (var i = 1; i < data.length; i++) {
+      var rowUrl = String(data[i][urlIdx]).trim().toLowerCase();
+      if (rowUrl === targetUrl) {
+        exists = true;
+        if (titleIdx !== -1) sheet.getRange(i + 1, titleIdx + 1).setValue(feed.title || "");
+        if (descIdx !== -1) sheet.getRange(i + 1, descIdx + 1).setValue(feed.description || "");
+        if (imgIdx !== -1) sheet.getRange(i + 1, imgIdx + 1).setValue(feed.image || "");
+        if (sourceIdx !== -1) sheet.getRange(i + 1, sourceIdx + 1).setValue(feed.sourceType || "SUBSTACK");
+        if (updatedIdx !== -1) sheet.getRange(i + 1, updatedIdx + 1).setValue(now);
+        break;
+      }
     }
   }
   
   if (!exists) {
-    sheet.appendRow([
-      feed.title || "",
-      feed.description || "",
-      feed.feedUrl || "",
-      feed.originalUrl || "",
-      feed.logoUrl || "",
-      feed.lastUpdated || new Date().toISOString()
-    ]);
+    var newRow = [];
+    for (var j = 0; j < headers.length; j++) {
+      var header = headers[j];
+      if (header === "title") {
+        newRow.push(feed.title || "");
+      } else if (header === "originalurl" || header === "url") {
+        newRow.push(feed.originalUrl || feed.url || "");
+      } else if (header === "description") {
+        newRow.push(feed.description || "");
+      } else if (header === "image" || header === "logourl") {
+        newRow.push(feed.image || "");
+      } else if (header === "sourcetype") {
+        newRow.push(feed.sourceType || "SUBSTACK");
+      } else if (header === "updatedat") {
+        newRow.push(now);
+      } else {
+        newRow.push("");
+      }
+    }
+    sheet.appendRow(newRow);
   }
 }
 
 function removeFeed(sheet, urlToRemove) {
-  var lastRow = sheet.getLastRow();
-  if (lastRow < 2) return;
+  ensureHeaders(sheet);
+  var data = sheet.getDataRange().getValues();
+  if (data.length <= 1) return;
   
-  var values = sheet.getRange(2, 4, lastRow - 1, 1).getValues();
-  var urlLower = urlToRemove.trim().toLowerCase();
+  var headers = data[0].map(function(h) { return String(h).trim().toLowerCase(); });
+  var urlIdx = headers.indexOf("originalurl");
+  if (urlIdx === -1) urlIdx = headers.indexOf("url");
+  if (urlIdx === -1) return;
   
-  for (var i = values.length - 1; i >= 0; i--) {
-    if (values[i][0] && values[i][0].toString().trim().toLowerCase() === urlLower) {
-      sheet.deleteRow(i + 2);
+  var targetUrl = urlToRemove.trim().toLowerCase();
+  
+  for (var i = data.length - 1; i >= 1; i--) {
+    var rowUrl = String(data[i][urlIdx]).trim().toLowerCase();
+    if (rowUrl === targetUrl) {
+      sheet.deleteRow(i + 1);
     }
   }
 }
 
 function deduplicate(sheet) {
   ensureHeaders(sheet);
+  var data = sheet.getDataRange().getValues();
+  if (data.length <= 2) return;
   
-  var lastRow = sheet.getLastRow();
-  if (lastRow < 3) return;
+  var headers = data[0].map(function(h) { return String(h).trim().toLowerCase(); });
+  var urlIdx = headers.indexOf("originalurl");
+  if (urlIdx === -1) urlIdx = headers.indexOf("url");
+  if (urlIdx === -1) return;
   
-  var values = sheet.getRange(2, 1, lastRow - 1, 6).getValues();
   var seen = {};
   var rowsToDelete = [];
   
-  for (var i = 0; i < values.length; i++) {
-    var originalUrl = values[i][3];
-    if (originalUrl) {
-      var urlKey = originalUrl.toString().trim().toLowerCase();
-      if (seen[urlKey]) {
-        rowsToDelete.push(i + 2);
-      } else {
-        seen[urlKey] = true;
-      }
+  for (var i = 1; i < data.length; i++) {
+    var url = String(data[i][urlIdx]).trim().toLowerCase();
+    if (!url) continue;
+    if (seen[url]) {
+      rowsToDelete.push(i + 1);
+    } else {
+      seen[url] = true;
     }
   }
   
@@ -193,9 +307,26 @@ function deduplicate(sheet) {
 }`;
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(APPS_SCRIPT_CODE);
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(APPS_SCRIPT_CODE).catch(() => {
+        fallbackCopy(APPS_SCRIPT_CODE);
+      });
+    } else {
+      fallbackCopy(APPS_SCRIPT_CODE);
+    }
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const fallbackCopy = (text: string) => {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
   };
 
   const handleSave = (e: React.FormEvent) => {
@@ -206,7 +337,7 @@ function deduplicate(sheet) {
     } else {
       localStorage.removeItem('stackreader_apps_script_url');
     }
-    onSave(cleanUrl);
+    onSave();
     setSaveSuccess(true);
     setTimeout(() => {
       setSaveSuccess(false);
@@ -217,7 +348,7 @@ function deduplicate(sheet) {
   const handleReset = () => {
     localStorage.removeItem('stackreader_apps_script_url');
     setCustomUrl('');
-    onSave('');
+    onSave();
     setSaveSuccess(true);
     setTimeout(() => {
       setSaveSuccess(false);
@@ -236,7 +367,7 @@ function deduplicate(sheet) {
       />
 
       {/* Modal Container */}
-      <div className="relative w-full max-w-2xl max-h-[85vh] overflow-y-auto rounded-[24px] bg-[#0E0F12] border border-white/5 shadow-2xl p-6 md:p-8 animate-in fade-in zoom-in-95 duration-200 text-left scrollbar-thin">
+      <div className="relative w-full max-w-2xl max-h-[85vh] overflow-y-auto rounded-[24px] bg-[#0E0F12] border border-white/5 shadow-2xl p-6 md:p-8 animate-in fade-in zoom-in-95 duration-200 text-left modal-scroll">
         
         {/* Header */}
         <div className="flex items-center gap-3 mb-6">
