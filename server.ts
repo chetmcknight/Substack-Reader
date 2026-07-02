@@ -131,18 +131,38 @@ async function startServer() {
       return res.status(500).json({ status: 'error', message: 'Apps Script URL not configured' });
     }
     
+    const fetchWithRetry = async (method: string, body?: unknown, retries = 1): Promise<Response> => {
+      for (let attempt = 0; attempt <= retries; attempt++) {
+        try {
+          const opts: RequestInit = {
+            method,
+            signal: AbortSignal.timeout(method === 'GET' ? 30000 : 20000),
+            headers: body ? { 'Content-Type': 'application/json' } : undefined,
+            body: body ? JSON.stringify(body) : undefined,
+          };
+          const response = await fetch(APPS_SCRIPT_URL, opts);
+          if (response.ok) return response;
+          if (attempt < retries) {
+            console.warn(`Apps script ${method} failed (attempt ${attempt + 1}/${retries + 1}), retrying...`);
+            continue;
+          }
+          const errorText = await response.text().catch(() => 'no text');
+          const shortError = errorText.length > 200 ? errorText.substring(0, 200) + '...' : errorText;
+          throw new Error(`Google Sheets ${method} failed with status ${response.status}. Details: ${shortError}`);
+        } catch (err: any) {
+          if (attempt < retries && (err.name === 'TimeoutError' || err.message?.includes('fetch failed'))) {
+            console.warn(`Apps script ${method} timed out (attempt ${attempt + 1}/${retries + 1}), retrying...`);
+            continue;
+          }
+          throw err;
+        }
+      }
+      throw new Error('Unreachable');
+    };
+
     try {
       if (req.method === 'GET') {
-        const response = await fetch(APPS_SCRIPT_URL, {
-          method: 'GET',
-          signal: AbortSignal.timeout(15000)
-        });
-        if (!response.ok) {
-          const errorText = await response.text().catch(() => 'no text');
-          console.error(`Apps script get failed. Status: ${response.status}. Body: ${errorText}`);
-          const shortError = errorText.length > 200 ? errorText.substring(0, 200) + '...' : errorText;
-          throw new Error(`Google Sheets fetch failed with status ${response.status}. Details: ${shortError}`);
-        }
+        const response = await fetchWithRetry('GET');
         const text = await response.text();
         try {
           const json = JSON.parse(text);
@@ -152,22 +172,7 @@ async function startServer() {
           return res.send(text);
         }
       } else if (req.method === 'POST') {
-        const response = await fetch(APPS_SCRIPT_URL, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(req.body),
-          signal: AbortSignal.timeout(15000)
-        });
-        if (!response.ok) {
-          const errorText = await response.text().catch(() => 'no text');
-          console.error(`Apps script post failed. Status: ${response.status}. Body: ${errorText}`);
-          
-          // Truncate the error text if it's too long (e.g. an HTML error page)
-          const shortError = errorText.length > 200 ? errorText.substring(0, 200) + '...' : errorText;
-          throw new Error(`Google Sheets post failed with status ${response.status}. Details: ${shortError}`);
-        }
+        const response = await fetchWithRetry('POST', req.body);
         const text = await response.text();
         try {
           const json = JSON.parse(text);
