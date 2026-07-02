@@ -243,6 +243,15 @@ async function startServer() {
   // Determine if we are in production
   const isProduction = process.env.NODE_ENV === "production" || process.argv[1]?.endsWith('server.cjs');
 
+  // Serve service worker with no-cache headers so SW updates are never blocked by HTTP cache
+  app.get('/sw.js', (req, res) => {
+    const swPath = isProduction
+      ? path.join(process.cwd(), 'dist', 'sw.js')
+      : path.join(process.cwd(), 'public', 'sw.js');
+    res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.sendFile(swPath);
+  });
+
   // Vite middleware for development
   if (!isProduction) {
     const { createServer: createViteServer } = await import('vite');
